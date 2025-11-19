@@ -173,6 +173,18 @@ impl XFastTrie {
         None
     }
 
+    //  TODO: support variable length keys
+    pub fn lookup(&self, key: Key) -> Option<Arc<RwLock<RepNode>>> {
+
+        let x_fast_value = self.levels[self.no_levels as usize].table.get(&key)?;
+        if let Some(min_rep) = &x_fast_value.min_rep {
+            if let Ok(min_rep_guard) = min_rep.read() {
+                assert_eq!(min_rep_guard.key, key);
+            }
+        }
+        x_fast_value.min_rep.clone()
+    }
+
     // insert a key into the x-fast trie
     pub fn insert(&mut self, key: Key) {
 
@@ -483,6 +495,25 @@ mod tests {
         if let Some(succ) = trie.successor(15) {
             if let Ok(succ_guard) = succ.read() {
                 assert_eq!(succ_guard.key, 20);
+            }
+        }
+    }
+
+    #[test]
+    fn test_lookup() {
+        let mut trie = XFastTrie::new(8);
+        let keys = vec![10, 5, 15, 3, 12];
+        
+        for key in &keys {
+            trie.insert(*key);
+        }
+
+        for key in &keys {
+            assert!(trie.lookup(*key).is_some());
+            if let Some(lookup) = trie.lookup(*key) {
+                if let Ok(lookup_guard) = lookup.read() {
+                    assert_eq!(lookup_guard.key, *key);
+                }
             }
         }
     }
