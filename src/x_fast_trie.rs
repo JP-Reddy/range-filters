@@ -231,7 +231,7 @@ impl XFastTrie {
 
         // step 4: update all prefixes' parents' min and max representatives
         if longest_prefix_length > 0 {
-            for prefix_length in (1..=longest_prefix_length - 1).rev() {
+            for prefix_length in (1..=self.no_levels - 1).rev() {
                 let prefix = key >> (self.no_levels - prefix_length);
                 let mut x_fast_value = self.levels[prefix_length as usize].table.get_mut(&prefix).unwrap();
 
@@ -491,17 +491,202 @@ mod tests {
     #[test]
     fn test_edge_cases() {
         let mut trie = XFastTrie::new(8);
-        
+
         // predecessor of empty trie
         assert!(trie.predecessor(10).is_none());
-        
+
         // insert single key
         trie.insert(50);
-        
+
         // predecessor of smaller value
         assert!(trie.predecessor(10).is_none());
-        
-        // successor of larger value  
+
+        // successor of larger value
         assert!(trie.successor(100).is_none());
+    }
+
+    // helper function to verify min/max representatives at a given level and prefix
+    fn verify_min_max(trie: &XFastTrie, level: usize, prefix: Key, expected_min: Key, expected_max: Key) {
+        let value = trie.levels[level].table.get(&prefix)
+            .expect(&format!("prefix {} not found at level {}", prefix, level));
+
+        if let Some(min_rep) = &value.min_rep {
+            if let Ok(rep_guard) = min_rep.read() {
+                assert_eq!(rep_guard.key, expected_min,
+                    "Level {}, prefix {}: expected min_rep={}, got {}",
+                    level, prefix, expected_min, rep_guard.key);
+            }
+        } else {
+            panic!("Level {}, prefix {}: min_rep is None", level, prefix);
+        }
+
+        if let Some(max_rep) = &value.max_rep {
+            if let Ok(rep_guard) = max_rep.read() {
+                assert_eq!(rep_guard.key, expected_max,
+                    "Level {}, prefix {}: expected max_rep={}, got {}",
+                    level, prefix, expected_max, rep_guard.key);
+            }
+        } else {
+            panic!("Level {}, prefix {}: max_rep is None", level, prefix);
+        }
+    }
+
+    #[test]
+    fn test_min_max_values_comprehensive() {
+        let mut trie = XFastTrie::new(8);
+        let keys = vec![10, 5, 15, 3, 12];
+
+        for key in &keys {
+            trie.insert(*key);
+        }
+
+        // Level 1
+        verify_min_max(&trie, 1, 0b0, 3, 15);
+
+        // Level 2
+        verify_min_max(&trie, 2, 0b00, 3, 15);
+
+        // Level 3
+        verify_min_max(&trie, 3, 0b000, 3, 15);
+
+        // Level 4
+        verify_min_max(&trie, 4, 0b0000, 3, 15);
+
+        // Level 5
+        verify_min_max(&trie, 5, 0b00000, 3, 5);
+        verify_min_max(&trie, 5, 0b00001, 10, 15);
+
+        // Level 6
+        verify_min_max(&trie, 6, 0b000000, 3, 3);
+        verify_min_max(&trie, 6, 0b000001, 5, 5);
+        verify_min_max(&trie, 6, 0b000010, 10, 10);
+        verify_min_max(&trie, 6, 0b000011, 12, 15);
+
+        // Level 7
+        verify_min_max(&trie, 7, 0b0000001, 3, 3);
+        verify_min_max(&trie, 7, 0b0000010, 5, 5);
+        verify_min_max(&trie, 7, 0b0000101, 10, 10);
+        verify_min_max(&trie, 7, 0b0000110, 12, 12);
+        verify_min_max(&trie, 7, 0b0000111, 15, 15);
+
+        // Level 8 (leaf level)
+        verify_min_max(&trie, 8, 0b00000011, 3, 3);
+        verify_min_max(&trie, 8, 0b00000101, 5, 5);
+        verify_min_max(&trie, 8, 0b00001010, 10, 10);
+        verify_min_max(&trie, 8, 0b00001100, 12, 12);
+        verify_min_max(&trie, 8, 0b00001111, 15, 15);
+    }
+
+    #[test]
+    fn test_min_max_single_key() {
+        let mut trie = XFastTrie::new(8);
+        trie.insert(42); // 42 = 0b00101010
+
+        // all nodes should have min_rep=42 and max_rep=42
+        // Level 1: prefix 0
+        verify_min_max(&trie, 1, 0b0, 42, 42);
+
+        // Level 2: prefix 00
+        verify_min_max(&trie, 2, 0b00, 42, 42);
+
+        // Level 3: prefix 001
+        verify_min_max(&trie, 3, 0b001, 42, 42);
+
+        // Level 4: prefix 0010
+        verify_min_max(&trie, 4, 0b0010, 42, 42);
+
+        // Level 5: prefix 00101
+        verify_min_max(&trie, 5, 0b00101, 42, 42);
+
+        // Level 6: prefix 001010
+        verify_min_max(&trie, 6, 0b001010, 42, 42);
+
+        // Level 7: prefix 0010101
+        verify_min_max(&trie, 7, 0b0010101, 42, 42);
+
+        // Level 8: prefix 00101010
+        verify_min_max(&trie, 8, 0b00101010, 42, 42);
+    }
+    
+    #[test]
+    fn test_min_max_adjacent_keys() {
+        let mut trie = XFastTrie::new(8);
+        trie.insert(8);  // 0b00001000
+        trie.insert(9);  // 0b00001001
+
+        // these keys differ only in the last bit, so they share prefix up to level 7
+        verify_min_max(&trie, 1, 0b0, 8, 9);
+        verify_min_max(&trie, 2, 0b00, 8, 9);
+        verify_min_max(&trie, 3, 0b000, 8, 9);
+        verify_min_max(&trie, 4, 0b0000, 8, 9);
+        verify_min_max(&trie, 5, 0b00001, 8, 9);
+        verify_min_max(&trie, 6, 0b000010, 8, 9);
+        verify_min_max(&trie, 7, 0b0000100, 8, 9);
+
+        // leaf level - each key has its own entry
+        verify_min_max(&trie, 8, 0b00001000, 8, 8);
+        verify_min_max(&trie, 8, 0b00001001, 9, 9);
+    }
+
+    #[test]
+    fn test_min_max_sequential_insertion() {
+        let mut trie = XFastTrie::new(8);
+
+        // insert in increasing order
+        for key in [1, 2, 3, 4, 5] {
+            trie.insert(key);
+        }
+
+        // verify that min is always 1 and max is always 5 at top levels
+        // Level 1: all keys share prefix 0
+        verify_min_max(&trie, 1, 0b0, 1, 5);
+
+        // Level 8: each leaf has equal min and max
+        verify_min_max(&trie, 8, 0b00000001, 1, 1);
+        verify_min_max(&trie, 8, 0b00000010, 2, 2);
+        verify_min_max(&trie, 8, 0b00000011, 3, 3);
+        verify_min_max(&trie, 8, 0b00000100, 4, 4);
+        verify_min_max(&trie, 8, 0b00000101, 5, 5);
+    }
+
+    #[test]
+    fn test_min_max_reverse_insertion() {
+        let mut trie = XFastTrie::new(8);
+
+        // insert in decreasing order
+        for key in [5, 4, 3, 2, 1] {
+            trie.insert(key);
+        }
+
+        // min/max should be the same regardless of insertion order
+        verify_min_max(&trie, 1, 0b0, 1, 5);
+
+        // leaf level
+        verify_min_max(&trie, 8, 0b00000001, 1, 1);
+        verify_min_max(&trie, 8, 0b00000101, 5, 5);
+    }
+
+    #[test]
+    fn test_min_max_sparse_keys() {
+        let mut trie = XFastTrie::new(16);
+
+        // insert sparse keys with large gaps
+        trie.insert(1);   // 0b0000000000000001
+        trie.insert(128); // 0b0000000010000000
+        trie.insert(255); // 0b0000000011111111
+        trie.insert(64);  // 0b0000000001000000
+
+        // at level 1, keys all share prefix 0
+        verify_min_max(&trie, 1, 0b0, 1, 255);
+
+        // at level 9, keys diverge
+        verify_min_max(&trie, 9, 0b000000000, 1, 64);
+        verify_min_max(&trie, 9, 0b000000001, 128, 255);
+
+        // leaf level - each key has its own entry
+        verify_min_max(&trie, 16, 0b0000000000000001, 1, 1);
+        verify_min_max(&trie, 16, 0b0000000001000000, 64, 64);
+        verify_min_max(&trie, 16, 0b0000000010000000, 128, 128);
+        verify_min_max(&trie, 16, 0b0000000011111111, 255, 255);
     }
 }
