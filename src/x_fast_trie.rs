@@ -3,6 +3,8 @@ use dashmap::DashMap;
 
 pub type Key = u64;
 
+pub const ROOT_KEY: Key = 67;
+
 // placeholder
 #[derive(Debug, Default)]
 pub struct BSTGroup;
@@ -21,7 +23,7 @@ pub struct XFastTrie {
 
 #[derive(Debug, Default, Clone)]
 pub struct XFastLevel {
-    pub table: DashMap<u64, XFastValue>
+    pub table: DashMap<Key, XFastValue>
 }
 
 #[derive(Debug, Default, Clone)]
@@ -43,8 +45,19 @@ pub struct RepNode {
 
 impl XFastTrie {
     pub fn new(no_levels: u8) -> Self {
+        let mut levels = Vec::with_capacity(no_levels as usize + 1);
+        let root = XFastLevel::default();
+        
+        // insert the root level
+        // use a random key for the root level
+        root.table.insert(ROOT_KEY, XFastValue::default()); 
+        levels.push(root);
+        for _ in 1..=no_levels {
+            let new_level = XFastLevel::default();
+            levels.push(new_level);
+        }
         Self {
-            levels: vec![XFastLevel::default(); no_levels as usize + 1],
+            levels,
             head_rep: None,
             tail_rep: None,
             no_levels,
@@ -63,6 +76,7 @@ impl XFastTrie {
             let mid = (low + high + 1) / 2;
             let prefix = key >> (self.no_levels - mid);
             if self.levels[mid as usize].table.contains_key(&prefix) {
+                // println!("prefix: {} found at level {}", prefix, mid);
                 low = mid;
             }
             else {
@@ -72,6 +86,7 @@ impl XFastTrie {
 
         let best_level = low;
 
+        // println!("best_level: {}", best_level);
         if best_level == 0 {
             return self.head_rep.clone();
         }
@@ -145,20 +160,24 @@ impl XFastTrie {
 
         // step 1: find the longest prefix
         let mut low = 0;
-        let mut high = self.no_levels;
+        let mut high = self.no_levels + 1;
 
         while low < high {
-            let mid = (low + high + 1) / 2;
+            let mid = (low + high) / 2;
             let prefix = key >> (self.no_levels - mid);
             if self.levels[mid as usize].table.contains_key(&prefix) {
+                println!("prefix: {} found at level {}", prefix, mid);
                 low = mid;
             } else {
                 high = mid - 1;
+                println!("prefix: {} not found at level {}, searching in level {}", prefix, mid, high);
             }
         }
 
         let best_level = low;
 
+        println!("best_level: {}", best_level);
+        
         // step 2: create representative
         let representative = Arc::new(RwLock::new(RepNode {
             key,
@@ -168,7 +187,7 @@ impl XFastTrie {
         }));
 
         // step 3: create child prefixes from best_level+1 to no_levels
-        for level in (best_level + 1)..=self.no_levels {
+        for level in (best_level + 1)..=self.no_levels + 1 {
             let prefix = key >> (self.no_levels - level);
             let new_x_fast_value = XFastValue {
                 left_child: None,
@@ -183,12 +202,14 @@ impl XFastTrie {
                 if let Some(mut parent_value) = self.levels[(level - 1) as usize].table.get_mut(&parent_prefix) {
                     let bit = (key >> (self.no_levels - level)) & 1;
                     if bit == 0 {
-            
                         parent_value.left_child = Some(Arc::new(RwLock::new(new_x_fast_value.clone())));
                     } else {
                         parent_value.right_child = Some(Arc::new(RwLock::new(new_x_fast_value.clone())));
                     }
                 }
+            }
+            else {
+                
             }
         }
 
