@@ -18,7 +18,7 @@ pub struct XFastTrie {
     pub tail_rep: Option<Arc<RwLock<RepNode>>>,
     
     // no. of levels = no. of bits in the keys
-    pub no_levels: u8,
+    pub no_levels: usize,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -44,8 +44,8 @@ pub struct RepNode {
 }
 
 impl XFastTrie {
-    pub fn new(no_levels: u8) -> Self {
-        let mut levels = Vec::with_capacity(no_levels as usize + 1);
+    pub fn new(no_levels: usize) -> Self {
+        let mut levels = Vec::with_capacity(no_levels + 1);
         let root = XFastLevel::default();
         
         // insert the root level
@@ -60,15 +60,21 @@ impl XFastTrie {
             levels,
             head_rep: None,
             tail_rep: None,
-            no_levels,
+            no_levels: no_levels,
         }
     }
 
     // fn contains(&self, key: Key) -> bool {
     //     self.reps.contains_key(&key)
     // }
+    // find length of longest prefix of key
+    fn find_longest_prefix_length(&self, key: Key) -> usize {
 
-    pub fn predecessor(&self, key: Key) -> Option<Arc<RwLock<RepNode>>> {
+        // check if tree is empty
+        if self.levels[1].table.is_empty() {
+            return 0;
+        }
+
         let mut low = 0;
         let mut high = self.no_levels;
 
@@ -78,23 +84,28 @@ impl XFastTrie {
             if self.levels[mid as usize].table.contains_key(&prefix) {
                 // println!("prefix: {} found at level {}", prefix, mid);
                 low = mid;
-            }
-            else {
+            } else {
                 high = mid - 1;
+                // println!("prefix: {} not found at level {}, searching in level {}", prefix, mid, high);
             }
         }
 
-        let best_level = low;
+        low as usize
+    }
 
-        // println!("best_level: {}", best_level);
-        if best_level == 0 {
-            return self.head_rep.clone();
+    pub fn predecessor(&self, key: Key) -> Option<Arc<RwLock<RepNode>>> {
+
+        // empty trie
+        if self.levels[1].table.is_empty() {
+            return None;
         }
 
-        let prefix = key >> (self.no_levels - best_level);
+        let longest_prefix_length = self.find_longest_prefix_length(key);
 
+        // println!("longest_prefix_length: {}", longest_prefix_length);
+        let prefix = key >> (self.no_levels - longest_prefix_length);
 
-        let x_fast_value = self.levels[best_level as usize].table.get(&prefix)?;
+        let x_fast_value = self.levels[longest_prefix_length as usize].table.get(&prefix)?;
 
         if let Some(representative) = &x_fast_value.representative {
             if let Ok(rep) = representative.read() {
@@ -105,6 +116,9 @@ impl XFastTrie {
                     if let Some(left_weak) = &rep.left {
                         return left_weak.upgrade();
                     }
+                    else {
+                        return None;
+                    }
                 }
             }
         }
@@ -113,30 +127,16 @@ impl XFastTrie {
     }
 
     pub fn successor(&self, key: Key) -> Option<Arc<RwLock<RepNode>>> {
-        let mut low = 0;
-        let mut high = self.no_levels;
-
-        while low < high {
-            let mid = (low + high + 1) / 2;
-            let prefix = key >> (self.no_levels - mid);
-            if self.levels[mid as usize].table.contains_key(&prefix) {
-                low = mid;
-            }
-            else {
-                high = mid - 1;
-            }
+        // empty trie
+        if self.levels[1].table.is_empty() {
+            return None;
         }
 
-        let best_level = low;
+        let longest_prefix_length = self.find_longest_prefix_length(key);
 
-        if best_level == 0 {
-            return self.tail_rep.clone();
-        }
+        let prefix = key >> (self.no_levels - longest_prefix_length);
 
-        let prefix = key >> (self.no_levels - best_level);
-
-
-        let x_fast_value = self.levels[best_level as usize].table.get(&prefix)?;
+        let x_fast_value = self.levels[longest_prefix_length as usize].table.get(&prefix)?;
 
         if let Some(representative) = &x_fast_value.representative {
             if let Ok(rep) = representative.read() {
@@ -147,6 +147,9 @@ impl XFastTrie {
                     if let Some(right_weak) = &rep.right {
                         return right_weak.upgrade();
                     }
+                    else {
+                        return None;
+                    }
                 }
             }
         }
@@ -154,30 +157,17 @@ impl XFastTrie {
         None
     }
 
-
     // insert a key into the x-fast trie
     pub fn insert(&mut self, key: Key) {
 
-        // step 1: find the longest prefix
-        let mut low = 0;
-        let mut high = self.no_levels + 1;
+        // step 1: find the longest prefix length 
+        let longest_prefix_length = self.find_longest_prefix_length(key);
 
-        while low < high {
-            let mid = (low + high) / 2;
-            let prefix = key >> (self.no_levels - mid);
-            if self.levels[mid as usize].table.contains_key(&prefix) {
-                println!("prefix: {} found at level {}", prefix, mid);
-                low = mid;
-            } else {
-                high = mid - 1;
-                println!("prefix: {} not found at level {}, searching in level {}", prefix, mid, high);
-            }
-        }
-
-        let best_level = low;
-
-        println!("best_level: {}", best_level);
+        println!("longest_prefix_length: {}", longest_prefix_length);
         
+        let predecessor = self.predecessor(key);
+        let successor = self.successor(key);
+
         // step 2: create representative
         let representative = Arc::new(RwLock::new(RepNode {
             key,
@@ -186,21 +176,21 @@ impl XFastTrie {
             bucket: None,
         }));
 
-        // step 3: create child prefixes from best_level+1 to no_levels
-        for level in (best_level + 1)..=self.no_levels + 1 {
-            let prefix = key >> (self.no_levels - level);
+        // step 3: create child prefixes from longest_prefix_length+1 to no_levels
+        for prefix_length in (longest_prefix_length+1)..=self.no_levels {
+            let prefix = key >> (self.no_levels - prefix_length);
             let new_x_fast_value = XFastValue {
                 left_child: None,
                 right_child: None,
                 representative: Some(representative.clone()),
             };
-            self.levels[level as usize].table.insert(prefix, new_x_fast_value.clone());
+            self.levels[prefix_length as usize].table.insert(prefix, new_x_fast_value.clone());
 
             // update parent's child pointers
-            if level > 1 {
-                let parent_prefix = key >> (self.no_levels - (level - 1));
-                if let Some(mut parent_value) = self.levels[(level - 1) as usize].table.get_mut(&parent_prefix) {
-                    let bit = (key >> (self.no_levels - level)) & 1;
+            if prefix_length > 1 {
+                let parent_prefix = key >> (self.no_levels - (prefix_length - 1));
+                if let Some(mut parent_value) = self.levels[(prefix_length - 1) as usize].table.get_mut(&parent_prefix) {
+                    let bit = (key >> (self.no_levels - prefix_length)) & 1;
                     if bit == 0 {
                         parent_value.left_child = Some(Arc::new(RwLock::new(new_x_fast_value.clone())));
                     } else {
@@ -209,14 +199,19 @@ impl XFastTrie {
                 }
             }
             else {
-                
+                // update root level child pointers
+                if let Some(mut root_value) = self.levels[0].table.get_mut(&ROOT_KEY) {
+                    let bit = key >> (self.no_levels - prefix_length);
+                    if bit == 0 {
+                        root_value.left_child = Some(Arc::new(RwLock::new(new_x_fast_value.clone())));
+                    } else {
+                        root_value.right_child = Some(Arc::new(RwLock::new(new_x_fast_value.clone())));
+                    }
+                }
             }
         }
 
         // step 4: update linked list pointers
-        let predecessor = self.predecessor(key);
-        let successor = self.successor(key);
-        
         // update predecessor's right pointer
         if let Some(pred) = &predecessor {
             if let Ok(mut pred_guard) = pred.write() {
