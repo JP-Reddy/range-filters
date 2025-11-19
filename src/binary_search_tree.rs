@@ -24,8 +24,8 @@ impl BinarySearchTree {
 
         let mut sorted_keys = keys.to_vec();
         sorted_keys.sort();
-        
-        let root = Self::top_down_bst_insertion(&sorted_keys, 0, sorted_keys.len() - 1);
+
+        let root = Self::top_down_bst_insertion(&sorted_keys, 0, sorted_keys.len() as isize - 1);
         Self { root }
     }
 
@@ -34,11 +34,11 @@ impl BinarySearchTree {
             return None;
         }
 
-        let mid = (start + end) / 2;
+        let mid = ((start + end) / 2) as usize;
         let root = Box::new(TreeNode {
             key: keys[mid],
-            left: Self::top_down_bst_insertion(keys, start, mid - 1),
-            right: Self::top_down_bst_insertion(keys, mid + 1, end),
+            left: Self::top_down_bst_insertion(keys, start, mid as isize - 1),
+            right: Self::top_down_bst_insertion(keys, mid as isize + 1, end),
         });
         Some(root)
     }
