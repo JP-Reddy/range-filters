@@ -44,7 +44,6 @@ impl BinarySearchTree {
 
     pub fn insert(&mut self, key: Key) {
         Self::insert_recursive(&mut self.root, key);
-
     }
 
     fn insert_recursive(node: &mut Option<Box<TreeNode>>, key: Key) {
@@ -62,6 +61,25 @@ impl BinarySearchTree {
                     Self::insert_recursive(&mut n.left, key);
                 } else {
                     Self::insert_recursive(&mut n.right, key);
+                }
+            }
+        }
+    }
+
+    pub fn contains(&self, key: Key) -> bool {
+        Self::contains_recursive(&self.root, key)
+    }
+
+    fn contains_recursive(node: &Option<Box<TreeNode>>, key: Key) -> bool {
+        match node {
+            None => false,
+            Some(n) => {
+                if key == n.key {
+                    true
+                } else if key < n.key {
+                    Self::contains_recursive(&n.left, key)
+                } else {
+                    Self::contains_recursive(&n.right, key)
                 }
             }
         }
@@ -92,5 +110,51 @@ impl BinarySearchTree {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tree_construction() {
+        let bst = BinarySearchTree::new_with_keys(&[1, 2, 3, 20, 30, 4, 5, 6, 7]);
+        assert!(bst.contains(1));
+        assert!(bst.contains(2));
+        assert!(bst.contains(30));
+        assert!(bst.contains(4));
+        assert!(bst.contains(5));
+        assert!(bst.contains(6));
+        assert!(bst.contains(7));
+        assert!(!bst.contains(8));
+        assert!(!bst.contains(9));
+        assert!(!bst.contains(10));
+    }
+
+    #[test]
+    fn test_tree_insertion() {
+        let mut bst = BinarySearchTree::new();
+        bst.insert(1);
+        bst.insert(2);
+        bst.insert(3);
+        bst.insert(20);
+        bst.insert(30);
+        bst.insert(4);
+        bst.insert(5);
+        bst.insert(6);
+        bst.insert(7);
+        assert!(bst.contains(1));
+        assert!(bst.contains(2));
+        assert!(bst.contains(3));
+        assert!(bst.contains(20));
+        assert!(bst.contains(30));
+        assert!(bst.contains(4));
+        assert!(bst.contains(5));
+        assert!(bst.contains(6));
+        assert!(bst.contains(7));
+        assert!(!bst.contains(8));
+        assert!(!bst.contains(9));
+        assert!(!bst.contains(10));
     }
 }
