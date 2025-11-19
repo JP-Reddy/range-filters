@@ -1,7 +1,6 @@
+use crate::Key;
 
-type Key = u64;
-
-struct BinarySearchTree {
+pub struct BinarySearchTree {
     root: Option<Box<TreeNode>>,
 }
 
@@ -65,6 +64,33 @@ impl BinarySearchTree {
                     Self::insert_recursive(&mut n.right, key);
                 }
             }
-        }   
+        }
+    }
+
+    pub fn pretty_print(&self) {
+        println!("\n=== Binary Search Tree ===");
+        if self.root.is_none() {
+            println!("  (empty tree)");
+        } else {
+            Self::print_tree(&self.root, "", true);
+        }
+        println!("=========================\n");
+    }
+
+    fn print_tree(node: &Option<Box<TreeNode>>, prefix: &str, is_tail: bool) {
+        if let Some(n) = node {
+            println!("{}{} {}", prefix, if is_tail { "└──" } else { "├──" }, n.key);
+
+            let new_prefix = format!("{}{}", prefix, if is_tail { "    " } else { "│   " });
+
+            if n.right.is_some() || n.left.is_some() {
+                if n.right.is_some() {
+                    Self::print_tree(&n.right, &new_prefix, false);
+                }
+                if n.left.is_some() {
+                    Self::print_tree(&n.left, &new_prefix, true);
+                }
+            }
+        }
     }
 }

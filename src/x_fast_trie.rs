@@ -1,7 +1,6 @@
 use std::sync::{Arc, RwLock, Weak};
 use dashmap::DashMap;
-
-pub type Key = u64;
+use crate::Key;
 
 pub const ROOT_KEY: Key = 67;
 
