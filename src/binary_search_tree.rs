@@ -134,44 +134,60 @@ impl BinarySearchTreeGroup {
         }
     }
 
-    pub fn predecessor(&self, key: Key) -> Option<Key> {
-        Self::predecessor_recursive(&self.root, key, None)
+    pub fn predecessor_infix_store(&self, key: Key) -> Option<Arc<RwLock<InfixStore>>> {
+        Self::predecessor_store_recursive(&self.root, key, None)
     }
 
-    fn predecessor_recursive(node: &Option<Box<TreeNode>>, key: Key, best: Option<Key>) -> Option<Key> {
+    // fn predecessor_store_recursive(node: &Option<Box<TreeNode>>, key: Key, best: Option<Arc<RwLock<InfixStore>>>) -> Option<Arc<RwLock<InfixStore>>> {
+    //     match node {
+    //         None => best,
+    //         Some(n) => {
+    //             if n.key == key {
+    //                 Self::max_key(&n.left).or(best)
+    //             } else if key < n.key {
+    //                 Self::predecessor_recursive(&n.left, key, best)
+    //             } else {
+    //                 Self::predecessor_recursive(&n.right, key, Some(n.key))
+    //             }
+    //         }
+    //     }
+    // }
+
+    fn predecessor_store_recursive(node: &Option<Box<TreeNode>>, key: Key, best: Option<Arc<RwLock<InfixStore>>>) -> Option<Arc<RwLock<InfixStore>>> {
         match node {
             None => best,
             Some(n) => {
                 if n.key == key {
-                    Self::max_key(&n.left).or(best)
+                    n.infix_store.clone().or(best)
                 } else if key < n.key {
-                    Self::predecessor_recursive(&n.left, key, best)
+                    Self::predecessor_store_recursive(&n.left, key, best)
                 } else {
-                    Self::predecessor_recursive(&n.right, key, Some(n.key))
+                    Self::predecessor_store_recursive(&n.right, key, n.infix_store.clone())
                 }
             }
         }
     }
 
-    pub fn successor(&self, key: Key) -> Option<Key> {
-        Self::successor_recursive(&self.root, key, None)
+    pub fn successor_infix_store(&self, key: Key) -> Option<Arc<RwLock<InfixStore>>> {
+        Self::successor_store_recursive(&self.root, key, None)
     }
 
-    fn successor_recursive(node: &Option<Box<TreeNode>>, key: Key, best: Option<Key>) -> Option<Key> {
+    fn successor_store_recursive(node: &Option<Box<TreeNode>>, key: Key, best: Option<Arc<RwLock<InfixStore>>>) -> Option<Arc<RwLock<InfixStore>>> {
         match node {
             None => best,
             Some(n) => {
                 if n.key == key {
-                    Self::min_key(&n.right).or(best)
+                    n.infix_store.clone().or(best)
                 } else if key < n.key {
-                    Self::successor_recursive(&n.left, key, Some(n.key))
+                    Self::successor_store_recursive(&n.left, key, n.infix_store.clone())
                 } else {
-                    Self::successor_recursive(&n.right, key, best)
+                    Self::successor_store_recursive(&n.right, key, best)
                 }
             }
         }
     }
 
+    #[allow(dead_code)]
     fn min_key(node: &Option<Box<TreeNode>>) -> Option<Key> {
         match node {
             None => None,
@@ -185,6 +201,7 @@ impl BinarySearchTreeGroup {
         }
     }
 
+    #[allow(dead_code)]
     fn max_key(node: &Option<Box<TreeNode>>) -> Option<Key> {
         match node {
             None => None,
@@ -193,6 +210,34 @@ impl BinarySearchTreeGroup {
                     Some(n.key)
                 } else {
                     Self::max_key(&n.right)
+                }
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    fn min_node(node: &Option<Box<TreeNode>>) -> Option<&TreeNode> {
+        match node {
+            None => None,
+            Some(n) => {
+                if n.left.is_none() {
+                    Some(n)
+                } else {
+                    Self::min_node(&n.left)
+                }
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    fn max_node(node: &Option<Box<TreeNode>>) -> Option<&TreeNode> {
+        match node {
+            None => None,
+            Some(n) => {
+                if n.right.is_none() {
+                    Some(n)
+                } else {
+                    Self::max_node(&n.right)
                 }
             }
         }
@@ -269,5 +314,37 @@ mod tests {
         assert!(!bst.contains(8));
         assert!(!bst.contains(9));
         assert!(!bst.contains(10));
+    }
+
+    #[test]
+    fn test_predecessor_infix_store() {
+        let mut bst = BinarySearchTreeGroup::new_with_keys(&[10, 20, 30, 40, 50]);
+
+        bst.set_infix_store(10, InfixStore::default());
+        bst.set_infix_store(20, InfixStore::default());
+        bst.set_infix_store(30, InfixStore::default());
+        bst.set_infix_store(40, InfixStore::default());
+        bst.set_infix_store(50, InfixStore::default());
+
+        // exact match returns own store
+        let store_30 = bst.get_infix_store(30).unwrap();
+        let pred_30 = bst.predecessor_infix_store(30).unwrap();
+        assert!(Arc::ptr_eq(&store_30, &pred_30));
+
+        // between keys returns predecessor's store
+        let pred_35 = bst.predecessor_infix_store(35).unwrap();
+        assert!(Arc::ptr_eq(&store_30, &pred_35));
+
+        let store_20 = bst.get_infix_store(20).unwrap();
+        let pred_25 = bst.predecessor_infix_store(25).unwrap();
+        assert!(Arc::ptr_eq(&store_20, &pred_25));
+
+        // before first key
+        assert!(bst.predecessor_infix_store(5).is_none());
+
+        // after last key
+        let store_50 = bst.get_infix_store(50).unwrap();
+        let pred_60 = bst.predecessor_infix_store(60).unwrap();
+        assert!(Arc::ptr_eq(&store_50, &pred_60));
     }
 }
