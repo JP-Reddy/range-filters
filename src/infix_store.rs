@@ -1,6 +1,6 @@
 
 use crate::Key;
-use crate::bitmap::{set_bit, rank};
+use crate::bitmap::{set_bit, get_bit, rank, select};
 
 const TARGET_SIZE: u16 = 1024;
 const LOAD_FACTOR: f64 = 0.95;
@@ -199,4 +199,59 @@ impl InfixStore {
         // store in first word: [occupieds_popcount: 32 bits][runends_popcount: 32 bits]
         data[0] = ((occupieds_popcount as u64) << 32) | (runends_popcount as u64);
     }
+
+    /// get memory layout offsets
+    fn get_offsets(&self) -> (usize, usize, usize) {
+        let num_slots = SCALED_SIZES[self.size_grade as usize];
+        let occupieds_start = 1;
+        let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
+        let runends_start = occupieds_start + occupieds_words;
+        let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
+        let slots_start = runends_start + runends_words;
+
+        (occupieds_start, runends_start, slots_start)
+    }
+
+    /// check if a quotient bit is set in occupieds
+    pub fn is_occupied(&self, quotient: usize) -> bool {
+        let (occupieds_start, _, _) = self.get_offsets();
+        let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
+        let occupieds_slice = &self.data[occupieds_start..occupieds_start + occupieds_words];
+        get_bit(occupieds_slice, quotient)
+    }
+
+    /// check if a slot position has runend bit set
+    pub fn is_runend(&self, slot_pos: usize) -> bool {
+        let num_slots = SCALED_SIZES[self.size_grade as usize];
+        let (_, runends_start, _) = self.get_offsets();
+        let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
+        let runends_slice = &self.data[runends_start..runends_start + runends_words];
+        get_bit(runends_slice, slot_pos)
+    }
+
+    /// read remainder value from a specific slot
+    pub fn read_slot(&self, slot_index: usize) -> u64 {
+        let num_slots = SCALED_SIZES[self.size_grade as usize];
+        let (_, _, slots_start) = self.get_offsets();
+        let slots_words = (num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
+        let slots_slice = &self.data[slots_start..slots_start + slots_words];
+
+        let bit_pos = slot_index * self.remainder_size as usize;
+        let word_index = bit_pos / U64_BITS;
+        let bit_offset = bit_pos % U64_BITS;
+
+        let mut result = (slots_slice[word_index] >> bit_offset) & ((1u64 << self.remainder_size) - 1);
+
+        // handle overflow from next word if needed
+        if bit_offset + self.remainder_size as usize > U64_BITS {
+            let overflow_bits = (bit_offset + self.remainder_size as usize) - U64_BITS;
+            let overflow_mask = (1u64 << overflow_bits) - 1;
+            let overflow_value = slots_slice[word_index + 1] & overflow_mask;
+            result |= overflow_value << (self.remainder_size as usize - overflow_bits);
+        }
+
+        result
+    }
 }
+
+
