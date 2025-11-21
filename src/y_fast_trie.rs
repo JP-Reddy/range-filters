@@ -1,6 +1,6 @@
 use crate::x_fast_trie::XFastTrie;
 use crate::binary_search_tree::BinarySearchTreeGroup;
-use crate::binary_search_tree::InfixStore;
+use crate::infix_store::InfixStore;
 use crate::Key;
 use std::sync::{Arc, RwLock};
 
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_infix_stores() {
-        use crate::binary_search_tree::InfixStore;
+        use crate::infix_store::InfixStore;
 
         // 24 keys: boundaries at 0, 24, 48
         let keys: Vec<Key> = (0..24).map(|i| i * 3).collect();

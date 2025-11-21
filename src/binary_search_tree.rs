@@ -1,8 +1,9 @@
 use std::sync::{Arc, RwLock};
 use crate::Key;
+use crate::infix_store::InfixStore;
 
-#[derive(Debug, Default)]
-pub struct InfixStore;
+// #[derive(Debug, Default)]
+// pub struct InfixStore;
 
 #[derive(Debug, Default)]
 pub struct BinarySearchTreeGroup {
