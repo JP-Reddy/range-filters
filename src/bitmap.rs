@@ -6,6 +6,11 @@ pub fn set_bit(data: &mut [u64], pos: usize) {
 }
 
 #[inline]
+pub fn clear_bit(data: &mut [u64], pos: usize) {
+    data[pos / U64_BIT_SIZE] &= !(1 << (pos % U64_BIT_SIZE));
+}
+
+#[inline]
 pub fn get_bit(data: &[u64], pos: usize) -> bool {
     data[pos / U64_BIT_SIZE] & (1 << (pos % U64_BIT_SIZE)) != 0
 }
@@ -65,6 +70,39 @@ fn select_in_word(word: u64, rank: usize) -> Option<usize> {
         }
     }
     None
+}
+
+/// optimized rank using cached halfway popcount
+/// if pos is in second half, start counting from cached midpoint
+#[inline]
+pub fn rank_cached(data: &[u64], pos: usize, half_pos: usize, cached_popcount: usize) -> usize {
+    if pos <= half_pos {
+        // query is in first half, use regular rank
+        rank(data, pos)
+    } else {
+        // query is in second half, start from cached count
+        let word_offset = half_pos / U64_BIT_SIZE;
+        let remaining = rank(&data[word_offset..], pos - half_pos);
+        cached_popcount + remaining
+    }
+}
+
+/// optimized select using cached halfway popcount
+/// if target rank is past cached count, start from midpoint
+#[inline]
+pub fn select_cached(data: &[u64], rank_val: usize, half_pos: usize, cached_popcount: usize) -> Option<usize> {
+    if rank_val < cached_popcount {
+        // target is in first half, use regular select
+        select(data, rank_val)
+    } else {
+        // target is in second half, start from cached midpoint
+        let remaining_rank = rank_val - cached_popcount;
+        let word_offset = half_pos / U64_BIT_SIZE;
+
+        // search in second half
+        select(&data[word_offset..], remaining_rank)
+            .map(|pos| pos + half_pos)
+    }
 }
 
 #[cfg(test)]
