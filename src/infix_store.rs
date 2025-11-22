@@ -1,11 +1,10 @@
 
-use crate::Key;
-use crate::bitmap::{set_bit, get_bit, rank, select};
+use crate::bitmap::{set_bit, get_bit, rank};
 
 const TARGET_SIZE: u16 = 1024;
-const LOAD_FACTOR: f64 = 0.95;
+// const LOAD_FACTOR: f64 = 0.95;
 const SIZE_GRADE_COUNT: usize = 31;
-const DEFAULT_SIZE_GRADE: u8 = 14;  // grade 14 = exactly 1024 slots
+// const DEFAULT_SIZE_GRADE: u8 = 14;  // grade 14 = exactly 1024 slots
 
 // precomputed number of slots for each size grade
 // size grades 0-30
@@ -24,7 +23,7 @@ const U64_BITS: usize = 64;
 pub struct InfixStore {
     elem_count: u16,
     size_grade: u8, // decides the number of slots in the infix store
-    quotient_size: u8,
+    // quotient_size: u8,
     remainder_size: u8,
     // lcp_length: u8,
     // redundant_bits_count: u8,
@@ -43,7 +42,7 @@ impl InfixStore {
     /// * `remainder_size` - Number of bits for remainder part
     pub fn new_with_infixes(
         infixes: &[u64],
-        quotient_size: u8,
+        // quotient_size: u8,
         remainder_size: u8,
     ) -> Self {
         // step 1: determine size_grade based on number of elements
@@ -66,7 +65,7 @@ impl InfixStore {
             return Self {
                 elem_count: 0,
                 size_grade,
-                quotient_size,
+                // quotient_size,
                 remainder_size,
                 data,
             };
@@ -83,7 +82,7 @@ impl InfixStore {
         Self {
             elem_count: infixes.len() as u16,
             size_grade,
-            quotient_size,
+            // quotient_size,
             remainder_size,
             data,
         }

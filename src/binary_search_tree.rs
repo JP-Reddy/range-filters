@@ -94,7 +94,7 @@ impl BinarySearchTreeGroup {
         }
     }
 
-    fn find_node_mu(node: &mut Option<Box<TreeNode>>, key: Key) -> Option<&mut TreeNode> {
+    fn find_node_mut(node: &mut Option<Box<TreeNode>>, key: Key) -> Option<&mut TreeNode> {
         match node {
             None => None,
             Some(n) => {
@@ -102,16 +102,16 @@ impl BinarySearchTreeGroup {
                     Some(n.as_mut())
                 }
                 else if key < n.key {
-                    Self::find_node_mu(&mut n.left, key)
+                    Self::find_node_mut(&mut n.left, key)
                 } else {
-                    Self::find_node_mu(&mut n.right, key)
+                    Self::find_node_mut(&mut n.right, key)
                 }
             }
         }
     }
 
     pub fn set_infix_store(&mut self, key: Key, infix_store: InfixStore) {
-        if let Some(node) = Self::find_node_mu(&mut self.root, key) {
+        if let Some(node) = Self::find_node_mut(&mut self.root, key) {
             node.infix_store = Some(Arc::new(RwLock::new(infix_store)));
         }
     }

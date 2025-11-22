@@ -56,6 +56,40 @@ impl YFastTrie {
         Self { x_fast_trie }
     }
 
+    pub fn get_infix_store(&self, key: Key) -> Option<Arc<RwLock<InfixStore>>> {
+        // find the boundary representative
+        let rep_node = self.x_fast_trie.lookup(key)?;
+        let rep = rep_node.read().ok()?;
+
+        // get the BST group and call its get_infix_store
+        if let Some(bst_group) = &rep.bst_group {
+            if let Ok(bst) = bst_group.read() {
+                return bst.get_infix_store(key);
+            }
+        }
+
+        None
+    }
+
+    pub fn set_infix_store(&mut self, key: Key, infix_store: InfixStore) {
+        // find the boundary representative
+        if let Some(rep_node) = self.x_fast_trie.lookup(key) {
+            if let Ok(rep) = rep_node.read() {
+                // get the BST group and call its set_infix_store
+                if let Some(bst_group) = &rep.bst_group {
+                    if let Ok(mut bst) = bst_group.write() {
+                        bst.set_infix_store(key, infix_store);
+                    }
+                }
+            }
+        }
+    }
+
+
+    // TODO: add insert method
+    // TODO: add next, previous methods
+    // TODO: create an iterator for the trie
+
     pub fn predecessor(&self, key: Key) -> Option<Key> {
         // find the boundary representative
         let rep_node = self.x_fast_trie.predecessor(key)?;
