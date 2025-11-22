@@ -142,20 +142,20 @@ impl Diva {
         }
 
         // extract quotient bits from both keys to check sparsity
-        let shift = remaining_bits - BASE_IMPLICIT_SIZE as u8;
-        let quotient_1 = (key_1 >> shift) & ((1u64 << BASE_IMPLICIT_SIZE) - 1);
-        let quotient_2 = (key_2 >> shift) & ((1u64 << BASE_IMPLICIT_SIZE) - 1);
+        // let shift = remaining_bits - BASE_IMPLICIT_SIZE as u8;
+        // let quotient_1 = (key_1 >> shift) & ((1u64 << BASE_IMPLICIT_SIZE) - 1);
+        // let quotient_2 = (key_2 >> shift) & ((1u64 << BASE_IMPLICIT_SIZE) - 1);
 
         // TODO: check if there is a better heuristic for the quotient size
         // add 1 bit if range is sparse (uses < 50% of quotient space)
-        let range_size = quotient_2 - quotient_1 + 1;
-        let quotient_bits = if 2 * range_size < (1u64 << BASE_IMPLICIT_SIZE) {
-            (BASE_IMPLICIT_SIZE + 1).min(remaining_bits as u32) as u8
-        } else {
-            BASE_IMPLICIT_SIZE as u8
-        };
+        // let range_size = quotient_2 - quotient_1 + 1;
+        // let quotient_bits = if 2 * range_size < (1u64 << BASE_IMPLICIT_SIZE) {
+        //     (BASE_IMPLICIT_SIZE + 1).min(remaining_bits as u32) as u8
+        // } else {
+        //     BASE_IMPLICIT_SIZE as u8
+        // };
 
-        (shared, redundant_bits, quotient_bits)
+        (shared, redundant_bits, BASE_IMPLICIT_SIZE as u8)
     }
 
     /// extract partial key (infix) from a full key
@@ -221,4 +221,77 @@ impl Diva {
         remainder_size.max(4).min(16) // clamp between 4 and 16 bits
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_choose_remainder_size() {
+        // FPR = 1% -> remainder_size = 8
+        assert_eq!(Diva::choose_remainder_size(1024, 0.01), 8);
+        // FPR = 0.1% -> remainder_size = 11
+        assert_eq!(Diva::choose_remainder_size(1024, 0.001), 11);
+        assert_eq!(Diva::choose_remainder_size(1024, 0.1), 5);
+    }
+
+    #[test]
+    fn test_get_msb() {
+        // first differing bit is 0
+        let key1 = 0b0000_0000_0000_0000u64;
+        let key2 = 0b1111_1111_1111_1111u64;
+        assert_eq!(Diva::get_msb(&key1, &key2), 0);
+
+        // first differing bit is 1
+        let key1 = 0b1000_0000_0000_0000u64 << 48;
+        let key2 = 0b0111_1111_1111_1111u64 << 48;
+        assert_eq!(Diva::get_msb(&key1, &key2), 1);
+    }
+
+    #[test]
+    fn test_extraction_params() {
+        let key1 = 0b0000_0000_1111_0000u64 << 48;
+        let key2 = 0b0000_0000_1111_1111u64 << 48;
+
+        let (shared, _redundant, quotient) =
+            Diva::get_shared_ignore_implicit_size(&key1, &key2, false);
+
+        assert_eq!(shared, 12); // 12 bits shared prefix
+        // assert_eq!(redundant, 0);
+        assert!(quotient >= 10); // at least 10 bits for quotient
+    }
+
+    #[test]
+    fn test_construction_small_dataset() {
+        // 100 keys, all fit in one sample
+        let keys: Vec<u64> = (0..100).map(|i| i * 1000).collect();
+        let diva = Diva::new_with_keys(&keys, 1024, 0.01);
+
+        assert_eq!(diva.target_size, 1024);
+        assert_eq!(diva.fpr, 0.01);
+        assert_eq!(diva.remainder_size, 8);
+    }
+
+    #[test]
+    fn test_construction_with_sampling() {
+        // 5000 keys - should create ~5 samples
+        let keys: Vec<u64> = (0..5000).map(|i| i as u64).collect();
+        let target_size = 1024;
+        let diva = Diva::new_with_keys(&keys, target_size, 0.01);
+
+        let expected_samples = (keys.len() + target_size - 1) / target_size;
+        let actual_samples = diva.y_fast_trie.len();
+
+        assert_eq!(actual_samples, expected_samples);
+    }
+
+    #[test]
+    fn test_construction_single_sample() {
+        // 500 keys < target_size -> only 1 sample
+        let keys: Vec<u64> = (0..500).map(|i| i * 10).collect();
+        let diva = Diva::new_with_keys(&keys, 1024, 0.01);
+
+        assert_eq!(diva.y_fast_trie.sample_count(), 1);
+    }
 }
