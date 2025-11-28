@@ -233,6 +233,76 @@ impl InfixStore {
 
         result
     }
+
+    pub fn pretty_print(&self) {
+        let num_slots = SCALED_SIZES[self.size_grade as usize];
+
+        println!("*** InfixStore ***");
+        println!("elem_count: {}", self.elem_count);
+        println!("size_grade: {}", self.size_grade);
+        println!("num_slots: {}", num_slots);
+        println!("remainder_size: {} bits", self.remainder_size);
+        println!();
+
+        println!("popcounts: 0x{:016x}", self.data[0]);
+        let occupieds_popcount = (self.data[0] & 0xFFFFFFFF) as u32;
+        let runends_popcount = (self.data[0] >> 32) as u32;
+        println!("  occupieds_popcount: {}", occupieds_popcount);
+        println!("  runends_popcount: {}", runends_popcount);
+        println!();
+
+        println!("occupieds bitmap (showing set quotients):");
+        let mut occupied_quotients = Vec::new();
+        for q in 0..TARGET_SIZE as usize {
+            if self.is_occupied(q) {
+                occupied_quotients.push(q);
+            }
+        }
+        if occupied_quotients.is_empty() {
+            println!("  (none)");
+        } else {
+            for chunk in occupied_quotients.chunks(16) {
+                print!("  ");
+                for &q in chunk {
+                    print!("{} ", q);
+                }
+                println!();
+            }
+        }
+        println!();
+
+        println!("runends bitmap (showing runend positions):");
+        let mut runend_positions = Vec::new();
+        for pos in 0..num_slots as usize {
+            if self.is_runend(pos) {
+                runend_positions.push(pos);
+            }
+        }
+        if runend_positions.is_empty() {
+            println!("  (none)");
+        } else {
+            for chunk in runend_positions.chunks(16) {
+                print!("  ");
+                for &pos in chunk {
+                    print!("{} ", pos);
+                }
+                println!();
+            }
+        }
+        println!();
+
+        println!("slots (pos: value [runend]):");
+        if self.elem_count == 0 {
+            println!("  (empty)");
+        } else {
+            for i in 0..self.elem_count as usize {
+                let value = self.read_slot(i);
+                let is_runend = self.is_runend(i);
+                println!("  {}: {} {}", i, value, if is_runend { "[R]" } else { "" });
+            }
+        }
+        println!("*************************");
+    }
 }
 
 #[cfg(test)]
