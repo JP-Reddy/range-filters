@@ -2,8 +2,8 @@ use crate::Key;
 use crate::binary_search_tree::BinarySearchTreeGroup;
 use crate::infix_store::InfixStore;
 use crate::x_fast_trie::XFastTrie;
-use std::sync::{Arc, RwLock};
 use std::fmt;
+use std::sync::{Arc, RwLock};
 
 pub struct YFastTrie {
     pub x_fast_trie: XFastTrie,
@@ -239,7 +239,7 @@ impl YFastTrie {
 
     fn collect_bst_keys_recursive(
         node: &Option<Box<crate::binary_search_tree::TreeNode>>,
-        keys: &mut Vec<Key>
+        keys: &mut Vec<Key>,
     ) {
         if let Some(n) = node {
             Self::collect_bst_keys_recursive(&n.left, keys);
@@ -251,9 +251,18 @@ impl YFastTrie {
 
 impl fmt::Display for YFastTrie {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "\n╔════════════════════════════════════════════════════════╗")?;
-        writeln!(f, "║             Y-FAST TRIE STRUCTURE                      ║")?;
-        writeln!(f, "╚════════════════════════════════════════════════════════╝")?;
+        writeln!(
+            f,
+            "\n╔════════════════════════════════════════════════════════╗"
+        )?;
+        writeln!(
+            f,
+            "║             Y-FAST TRIE STRUCTURE                      ║"
+        )?;
+        writeln!(
+            f,
+            "╚════════════════════════════════════════════════════════╝"
+        )?;
 
         // print stats
         writeln!(f, "\nStats:")?;
@@ -265,9 +274,18 @@ impl fmt::Display for YFastTrie {
         write!(f, "{}", self.x_fast_trie)?;
 
         // print BST groups for each representative
-        writeln!(f, "\n╔════════════════════════════════════════════════════════╗")?;
-        writeln!(f, "║             BST GROUPS (per representative)            ║")?;
-        writeln!(f, "╚════════════════════════════════════════════════════════╝\n")?;
+        writeln!(
+            f,
+            "\n╔════════════════════════════════════════════════════════╗"
+        )?;
+        writeln!(
+            f,
+            "║             BST GROUPS (per representative)            ║"
+        )?;
+        writeln!(
+            f,
+            "╚════════════════════════════════════════════════════════╝\n"
+        )?;
 
         if let Some(head) = &self.x_fast_trie.head_rep {
             let mut current = Some(head.clone());
@@ -288,7 +306,12 @@ impl fmt::Display for YFastTrie {
                             for &key in &keys {
                                 if let Some(infix_store_arc) = bst.get_infix_store(key) {
                                     if let Ok(infix_store) = infix_store_arc.read() {
-                                        infix_stats.push((key, infix_store.elem_count(), infix_store.remainder_size(), infix_store.num_slots()));
+                                        infix_stats.push((
+                                            key,
+                                            infix_store.elem_count(),
+                                            infix_store.remainder_size(),
+                                            infix_store.num_slots(),
+                                        ));
                                     }
                                 }
                             }
@@ -296,8 +319,11 @@ impl fmt::Display for YFastTrie {
                             if !infix_stats.is_empty() {
                                 writeln!(f, "  InfixStores:")?;
                                 for (key, elem_count, remainder_size, num_slots) in infix_stats {
-                                    writeln!(f, "    Key {}: {} elements, {} bit remainder, {} slots",
-                                        key, elem_count, remainder_size, num_slots)?;
+                                    writeln!(
+                                        f,
+                                        "    Key {}: {} elements, {} bit remainder, {} slots",
+                                        key, elem_count, remainder_size, num_slots
+                                    )?;
                                 }
                             }
                         }
@@ -315,9 +341,18 @@ impl fmt::Display for YFastTrie {
             writeln!(f, "  (no buckets)")?;
         }
 
-        writeln!(f, "\n╔════════════════════════════════════════════════════════╗")?;
-        writeln!(f, "║                    END Y-FAST TRIE                     ║")?;
-        writeln!(f, "╚════════════════════════════════════════════════════════╝\n")?;
+        writeln!(
+            f,
+            "\n╔════════════════════════════════════════════════════════╗"
+        )?;
+        writeln!(
+            f,
+            "║                    END Y-FAST TRIE                     ║"
+        )?;
+        writeln!(
+            f,
+            "╚════════════════════════════════════════════════════════╝\n"
+        )?;
         Ok(())
     }
 }

@@ -10,7 +10,7 @@ fn main() {
         trie.insert(*key);
     }
 
-    trie.pretty_print();
+    println!("{}", trie);
 
     println!("testing predecessor queries:");
     let queries = vec![2, 6, 8, 11, 13, 20];

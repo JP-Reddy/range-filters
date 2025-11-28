@@ -1,12 +1,11 @@
+use crate::Key;
+use crate::U64_BITS;
 use crate::infix_store::InfixStore;
 use crate::utils::longest_common_prefix_length;
 use crate::y_fast_trie::YFastTrie;
-use crate::U64_BITS;
 use std::fmt;
-use crate::Key;
 
 const BASE_IMPLICIT_SIZE: u32 = 10;
-
 
 /// Diva range filter
 ///
@@ -15,7 +14,7 @@ const BASE_IMPLICIT_SIZE: u32 = 10;
 /// * `target_size` - Target size
 /// * `fpr` - False positive rate
 /// * `remainder_size` - Remainder size
-/// 
+///
 /// # Example
 /// ```rust
 /// use range_filters::diva::Diva;
@@ -52,11 +51,7 @@ impl Diva {
         sorted_keys.sort();
         sorted_keys.dedup();
 
-        let mut sampled_keys: Vec<Key> = sorted_keys
-            .iter()
-            .step_by(target_size)
-            .copied()
-            .collect();
+        let mut sampled_keys: Vec<Key> = sorted_keys.iter().step_by(target_size).copied().collect();
 
         // ensure last key is sampled if not already
         if let Some(&last_key) = sorted_keys.last() {
@@ -262,9 +257,18 @@ impl Diva {
 
 impl fmt::Display for Diva {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "\n╔════════════════════════════════════════════════════════╗")?;
-        writeln!(f, "║                   DIVA RANGE FILTER                    ║")?;
-        writeln!(f, "╚════════════════════════════════════════════════════════╝")?;
+        writeln!(
+            f,
+            "\n╔════════════════════════════════════════════════════════╗"
+        )?;
+        writeln!(
+            f,
+            "║                   DIVA RANGE FILTER                    ║"
+        )?;
+        writeln!(
+            f,
+            "╚════════════════════════════════════════════════════════╝"
+        )?;
 
         // configuration
         writeln!(f, "\nConfiguration:")?;
@@ -275,7 +279,11 @@ impl fmt::Display for Diva {
         // stats
         writeln!(f, "\nStatistics:")?;
         writeln!(f, "  Total keys:           {}", self.y_fast_trie.len())?;
-        writeln!(f, "  Sample count:         {}", self.y_fast_trie.sample_count())?;
+        writeln!(
+            f,
+            "  Sample count:         {}",
+            self.y_fast_trie.sample_count()
+        )?;
         let avg_bucket_size = if self.y_fast_trie.sample_count() > 0 {
             self.y_fast_trie.len() as f64 / self.y_fast_trie.sample_count() as f64
         } else {

@@ -1,7 +1,6 @@
 use range_filters::infix_store::InfixStore;
 
 fn main() {
-
     let mut keys = vec![
         127u64 << 8 | 42,
         127u64 << 8 | 43,
@@ -14,8 +13,8 @@ fn main() {
 
     keys.sort();
     println!("keys: {:?}", keys);
-    
+
     let infix_store = InfixStore::new_with_infixes(&keys, 8);
-    infix_store.pretty_print();
+    println!("{}", infix_store);
     // println!("infix store: {:?}", infix_store);
 }

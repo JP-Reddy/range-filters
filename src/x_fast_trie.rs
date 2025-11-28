@@ -1,8 +1,8 @@
 use crate::Key;
 use crate::binary_search_tree::BinarySearchTreeGroup;
 use dashmap::DashMap;
-use std::sync::{Arc, RwLock, Weak};
 use std::fmt;
+use std::sync::{Arc, RwLock, Weak};
 
 pub const ROOT_KEY: Key = 67;
 
@@ -116,8 +116,7 @@ impl XFastTrie {
             if let Some(root_value) = self.levels[1].table.get(&0) {
                 return Some(root_value.max_rep.clone()?);
             }
-        }
-        else if longest_prefix_length == 0 && key >> (self.no_levels - 1) == 0 {
+        } else if longest_prefix_length == 0 && key >> (self.no_levels - 1) == 0 {
             return None;
         }
 
@@ -162,8 +161,7 @@ impl XFastTrie {
 
         if longest_prefix_length == 0 && key >> (self.no_levels - 1) == 1 {
             return None;
-        }
-        else if longest_prefix_length == 0 && key >> (self.no_levels - 1) == 0 {
+        } else if longest_prefix_length == 0 && key >> (self.no_levels - 1) == 0 {
             // find the min representative of the root level
             if let Some(root_value) = self.levels[1].table.get(&1) {
                 return Some(root_value.min_rep.clone()?);
@@ -382,7 +380,10 @@ impl XFastTrie {
         Ok(())
     }
 
-    fn format_linked_list_helper(node: &Arc<RwLock<RepNode>>, f: &mut fmt::Formatter) -> fmt::Result {
+    fn format_linked_list_helper(
+        node: &Arc<RwLock<RepNode>>,
+        f: &mut fmt::Formatter,
+    ) -> fmt::Result {
         if let Ok(node_guard) = node.read() {
             write!(f, "{} ", node_guard.key)?;
 

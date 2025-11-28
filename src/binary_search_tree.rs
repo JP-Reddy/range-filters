@@ -1,7 +1,7 @@
 use crate::Key;
 use crate::infix_store::InfixStore;
-use std::sync::{Arc, RwLock};
 use std::fmt;
+use std::sync::{Arc, RwLock};
 
 // #[derive(Debug, Default)]
 // pub struct InfixStore;
@@ -302,7 +302,12 @@ impl BinarySearchTreeGroup {
         print!("{}", self);
     }
 
-    fn format_tree(node: &Option<Box<TreeNode>>, prefix: &str, is_tail: bool, f: &mut fmt::Formatter) -> fmt::Result {
+    fn format_tree(
+        node: &Option<Box<TreeNode>>,
+        prefix: &str,
+        is_tail: bool,
+        f: &mut fmt::Formatter,
+    ) -> fmt::Result {
         if let Some(n) = node {
             writeln!(
                 f,

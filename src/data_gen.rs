@@ -3,7 +3,7 @@ use rand::thread_rng;
 use rand_distr::{Distribution, Normal, Uniform};
 
 // default = 64k keys
-const DEFAULT_COUNT: usize = 1 << 16; 
+const DEFAULT_COUNT: usize = 1 << 16;
 
 pub fn generate_normal_u64(count: usize, mean: f64, std_dev: f64) -> Vec<u64> {
     let normal = Normal::new(mean, std_dev).unwrap();
@@ -69,27 +69,21 @@ pub fn generate_uniform_u64(count: usize, min: u64, max: u64) -> Vec<u64> {
     let uniform = Uniform::new_inclusive(min, max);
     let mut rng = thread_rng();
 
-    (0..count)
-        .map(|_| uniform.sample(&mut rng))
-        .collect()
+    (0..count).map(|_| uniform.sample(&mut rng)).collect()
 }
 
 pub fn generate_uniform_u32(count: usize, min: u32, max: u32) -> Vec<u32> {
     let uniform = Uniform::new_inclusive(min, max);
     let mut rng = thread_rng();
 
-    (0..count)
-        .map(|_| uniform.sample(&mut rng))
-        .collect()
+    (0..count).map(|_| uniform.sample(&mut rng)).collect()
 }
 
 pub fn generate_uniform_i32(count: usize, min: i32, max: i32) -> Vec<i32> {
     let uniform = Uniform::new_inclusive(min, max);
     let mut rng = thread_rng();
 
-    (0..count)
-        .map(|_| uniform.sample(&mut rng))
-        .collect()
+    (0..count).map(|_| uniform.sample(&mut rng)).collect()
 }
 
 pub fn generate_strings(count: usize, min_len: usize, max_len: usize) -> Vec<String> {
@@ -177,6 +171,9 @@ mod tests {
         let data = generate_strings(100, 5, 10);
         assert_eq!(data.len(), 100);
         assert!(data.iter().all(|s| s.len() >= 5 && s.len() <= 10));
-        assert!(data.iter().all(|s| s.chars().all(|c| c.is_ascii_lowercase())));
+        assert!(
+            data.iter()
+                .all(|s| s.chars().all(|c| c.is_ascii_lowercase()))
+        );
     }
 }

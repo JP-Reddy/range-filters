@@ -1,5 +1,5 @@
-use crate::bitmap::{get_bit, rank, set_bit};
 use crate::U64_BITS;
+use crate::bitmap::{get_bit, rank, set_bit};
 use std::fmt;
 
 const TARGET_SIZE: u16 = 1024;
@@ -16,7 +16,7 @@ const SCALED_SIZES: [u16; 31] = [
 ];
 
 /// Memory layout of data:
-/// [popcounts: 64 bits] [occupieds: TARGET_SIZE bits] 
+/// [popcounts: 64 bits] [occupieds: TARGET_SIZE bits]
 /// [runends: num_slots bits] [slots: num_slots * remainder_size bits]
 /// popcounts: 32 bits for occupieds and 32 bits for runends
 #[derive(Debug, Default)]
@@ -321,7 +321,13 @@ impl fmt::Display for InfixStore {
             for i in 0..self.elem_count as usize {
                 let value = self.read_slot(i);
                 let is_runend = self.is_runend(i);
-                writeln!(f, "  {}: {} {}", i, value, if is_runend { "[R]" } else { "" })?;
+                writeln!(
+                    f,
+                    "  {}: {} {}",
+                    i,
+                    value,
+                    if is_runend { "[R]" } else { "" }
+                )?;
             }
         }
         writeln!(f, "*************************")?;
