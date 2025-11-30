@@ -1,5 +1,5 @@
 use crate::U64_BITS;
-use crate::bitmap::{get_bit, rank, select, set_bit, clear_bit};
+use crate::bitmap::{clear_bit, get_bit, rank, select, set_bit};
 use std::fmt;
 
 const TARGET_SIZE: u16 = 1024;
@@ -196,7 +196,8 @@ impl InfixStore {
         let runends_start = occupieds_start + occupieds_words;
         let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
         let slots_start = runends_start + runends_words;
-        let slots_words = (num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
+        let slots_words =
+            (num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
 
         // check if this quotient already has a run
         let is_new_quotient = !self.is_occupied(quotient as usize);
@@ -208,7 +209,9 @@ impl InfixStore {
         let run_start = if run_index == 0 {
             0
         } else {
-            select(runends_slice, run_index - 1).map(|x| x + 1).unwrap_or(0)
+            select(runends_slice, run_index - 1)
+                .map(|x| x + 1)
+                .unwrap_or(0)
         };
 
         let insert_pos;
@@ -244,7 +247,8 @@ impl InfixStore {
         // set both runend and occupieds bits if new quotient
         if is_new_quotient {
             set_bit(runends_slice, insert_pos);
-            let occupieds_slice = &mut self.data[occupieds_start..occupieds_start + occupieds_words];
+            let occupieds_slice =
+                &mut self.data[occupieds_start..occupieds_start + occupieds_words];
             set_bit(occupieds_slice, quotient as usize);
         } else {
             // if inserted after the old run_end, clear and uset new run_end
@@ -273,7 +277,8 @@ impl InfixStore {
         let popcounts_words = 1;
         let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
         let new_runends_words = (new_num_slots as usize + U64_BITS - 1) / U64_BITS;
-        let new_slots_words = (new_num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
+        let new_slots_words =
+            (new_num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
         let total_words = popcounts_words + occupieds_words + new_runends_words + new_slots_words;
         let mut new_data = vec![0u64; total_words];
 
@@ -313,7 +318,8 @@ impl InfixStore {
     fn shift_slots_right(&mut self, start_pos: usize) {
         let num_slots = SCALED_SIZES[self.size_grade as usize];
         let (_, _, slots_start) = self.get_offsets();
-        let slots_words = (num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
+        let slots_words =
+            (num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
 
         for i in (start_pos..self.elem_count as usize).rev() {
             let value = self.read_slot(i);
@@ -338,7 +344,7 @@ impl InfixStore {
             }
         }
         clear_bit(runends_slice, start_pos);
-  }
+    }
 
     /// get memory layout offsets
     fn get_offsets(&self) -> (usize, usize, usize) {
