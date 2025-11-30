@@ -253,6 +253,35 @@ impl Diva {
     pub fn pretty_print(&self) {
         print!("{}", self);
     }
+
+        /// Point lookup: check if a key exists in the filter
+    /// Returns true if key might exist (with FPR), false if definitely doesn't exist
+    pub fn contains(&self, key: Key) -> bool {
+        // Step 1: Check Y-Fast Trie directly (samples)
+        if self.y_fast_trie.contains(key) {
+            return true;
+        }
+
+        // Step 2: Find predecessor sample to locate the appropriate InfixStore
+        if let Some(predecessor_infix_store) = self.y_fast_trie.predecessor_infix_store(key) {
+            // Step 3: Find predecessor and successor samples to get infix conversion params
+            if let Some(predecessor_key) = self.y_fast_trie.predecessor(key) {
+                if let Some(successor_key) = self.y_fast_trie.successor(key) {
+                    println!("Querying key {}, pred: {}, succ: {}", key, predecessor_key, successor_key);
+                    // Step 4: Query the InfixStore
+                    if let Ok(store) = predecessor_infix_store.read() {
+                        let result = store.point_query(key, predecessor_key, successor_key, self.remainder_size);
+                        println!("InfixStore query result for key {}: {}", key, result);
+                        return result;
+                    }
+                }
+            }
+        }
+
+        println!("No predecessor InfixStore found for key {}", key);
+
+        false
+    }
 }
 
 impl fmt::Display for Diva {
