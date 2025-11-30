@@ -180,22 +180,21 @@ impl InfixStore {
         data[0] = ((occupieds_popcount as u64) << 32) | (runends_popcount as u64);
     }
 
-    /// insert a key into the infix
-    pub fn insert(&mut self, quotient: u64, remainder: u64) {
+    /// insert a key into the infix store
+    pub fn insert(&mut self, quotient: u64, remainder: u64) -> bool {
         let mut num_slots = SCALED_SIZES[self.size_grade as usize];
 
-        // check if we have enough space
+        // check if we have enough space and resize if possible
         if self.elem_count >= num_slots {
-            self.resize_store();
+            if !self.resize_up() {
+                return false;
+            }
             num_slots = SCALED_SIZES[self.size_grade as usize];
         }
 
-        // calculate offsets
-        let occupieds_start = 1;
+        let (occupieds_start, runends_start, slots_start) = self.get_offsets();
         let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
-        let runends_start = occupieds_start + occupieds_words;
         let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
-        let slots_start = runends_start + runends_words;
         let slots_words =
             (num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
 
@@ -259,18 +258,85 @@ impl InfixStore {
                 }
             }
         }
-
         // increment element count
         self.elem_count += 1;
+
+        true
     }
 
-    fn resize_store(&mut self) {
-        // fail if already at max size
-        if self.size_grade as usize >= SIZE_GRADE_COUNT - 1 {
-            panic!("max capacity reached! cannot resize further.");
+    /// delete a key from the infix store
+    pub fn delete(&mut self, quotient: u64, remainder: u64) -> bool {
+        // check if the quotient exists
+        if !self.is_occupied(quotient as usize) {
+            return false;
         }
 
-        let new_size_grade = self.size_grade + 1;
+        let num_slots = SCALED_SIZES[self.size_grade as usize];
+        let (occupieds_start, runends_start, _) = self.get_offsets();
+        let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
+        let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
+
+        // find the run index
+        let occupieds_slice = &self.data[occupieds_start..occupieds_start + occupieds_words];
+        let runends_slice = &self.data[runends_start..runends_start + runends_words];
+        let run_index = rank(occupieds_slice, quotient as usize);
+
+        // calculate run start and end
+        let run_start = if run_index == 0 {
+            0
+        } else {
+            select(runends_slice, run_index - 1)
+                .map(|x| x + 1)
+                .unwrap_or(0)
+        };
+        let run_end =
+            select(runends_slice, run_index).expect("error: occupied bit set but no runend found.");
+
+        // find the slot position to be deleted
+        let mut del_pos = None;
+        for i in run_start..=run_end {
+            if self.read_slot(i) == remainder {
+                del_pos = Some(i);
+                break;
+            }
+        }
+        let pos = match del_pos {
+            Some(p) => p,
+            None => return false,
+        };
+
+        let runends_slice = &mut self.data[runends_start..runends_start + runends_words];
+
+        let is_last_item_in_run = run_start == run_end;
+        if is_last_item_in_run {
+            // if only item remaining in the run, remove the quotient as well
+            let occupieds_slice =
+                &mut self.data[occupieds_start..occupieds_start + occupieds_words];
+            clear_bit(occupieds_slice, quotient as usize);
+        } else if pos == run_end {
+            // if last item of a multi-item run, mark previous item as the new run_end
+            set_bit(runends_slice, pos - 1);
+        }
+
+        // shift slots and runends to the left and delete the remainder
+        self.shift_slots_left(pos);
+        self.shift_runends_left(pos);
+
+        // decrement element count
+        self.elem_count -= 1;
+
+        // check if we can size down a grade
+        if self.size_grade > 0 {
+            let prev_size_grade = SCALED_SIZES[(self.size_grade - 1) as usize];
+            if self.elem_count <= prev_size_grade / 2 {
+                self.resize_down();
+            }
+        }
+
+        true
+    }
+
+    fn resize_to(&mut self, new_size_grade: u8) {
         let new_num_slots = SCALED_SIZES[new_size_grade as usize];
 
         // initialize new data vector
@@ -312,7 +378,25 @@ impl InfixStore {
         }
 
         self.data = new_data;
-        self.size_grade = new_size_grade as u8;
+        self.size_grade = new_size_grade;
+    }
+
+    fn resize_up(&mut self) -> bool {
+        // fail if already at max size
+        if self.size_grade as usize >= SIZE_GRADE_COUNT - 1 {
+            return false;
+        }
+        self.resize_to(self.size_grade + 1);
+        true
+    }
+
+    fn resize_down(&mut self) -> bool {
+        // fail if already at the min size
+        if self.size_grade == 0 {
+            return false;
+        }
+        self.resize_to(self.size_grade - 1);
+        true
     }
 
     /// shift all slots from start_pos to the right by 1 (for insertion)
@@ -345,6 +429,38 @@ impl InfixStore {
             }
         }
         clear_bit(runends_slice, start_pos);
+    }
+
+    /// shift all slots to the left by 1 (after deletion)
+    fn shift_slots_left(&mut self, start_pos: usize) {
+        let num_slots = SCALED_SIZES[self.size_grade as usize];
+        let (_, _, slots_start) = self.get_offsets();
+        let slots_words =
+            (num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
+
+        for i in start_pos..(self.elem_count as usize - 1) {
+            let value = self.read_slot(i + 1);
+            let slots_slice = &mut self.data[slots_start..slots_start + slots_words];
+            Self::write_slot(slots_slice, i, value, self.remainder_size);
+        }
+    }
+
+    /// shift all runend bits to the left by 1 (after deletion)
+    fn shift_runends_left(&mut self, start_pos: usize) {
+        let num_slots = SCALED_SIZES[self.size_grade as usize];
+        let (_, runends_start, _) = self.get_offsets();
+        let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
+        let runends_slice = &mut self.data[runends_start..runends_start + runends_words];
+
+        for i in start_pos..(self.elem_count as usize - 1) {
+            let bit_value = get_bit(runends_slice, i + 1);
+            if bit_value {
+                set_bit(runends_slice, i);
+            } else {
+                clear_bit(runends_slice, i);
+            }
+        }
+        clear_bit(runends_slice, self.elem_count as usize - 1);
     }
 
     /// get memory layout offsets
@@ -730,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_with_resize() {
+    fn test_insert_with_resize_up() {
         let infixes: Vec<u64> = vec![];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
@@ -742,5 +858,89 @@ mod tests {
 
         assert_eq!(store.elem_count, 500);
         assert!(store.size_grade() > initial_size_grade);
+    }
+
+    #[test]
+    fn test_delete_middle_of_run() {
+        let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 20, (100u64 << 8) | 30];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        assert!(store.delete(100, 20));
+
+        assert_eq!(store.elem_count, 2);
+        assert_eq!(store.read_slot(0), 10);
+        assert_eq!(store.read_slot(1), 30);
+        assert!(store.is_runend(1));
+    }
+
+    #[test]
+    fn test_delete_end_of_run() {
+        let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 20, (100u64 << 8) | 30];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        assert!(store.delete(100, 30));
+
+        assert_eq!(store.elem_count, 2);
+        assert_eq!(store.read_slot(0), 10);
+        assert_eq!(store.read_slot(1), 20);
+        assert!(store.is_runend(1));
+        assert!(!store.is_runend(0));
+    }
+
+    #[test]
+    fn test_delete_beginning_of_run() {
+        let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 20, (100u64 << 8) | 30];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        assert!(store.delete(100, 10));
+
+        assert_eq!(store.elem_count, 2);
+        assert_eq!(store.read_slot(0), 20);
+        assert_eq!(store.read_slot(1), 30);
+        assert!(store.is_runend(1));
+    }
+
+    #[test]
+    fn test_delete_last_in_run() {
+        let infixes = vec![(100u64 << 8) | 10, (200u64 << 8) | 20];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        assert!(store.delete(100, 10));
+
+        assert_eq!(store.elem_count, 1);
+        assert!(!store.is_occupied(100));
+        assert!(store.is_occupied(200));
+        assert_eq!(store.read_slot(0), 20);
+        assert!(store.is_runend(0));
+    }
+
+    #[test]
+    fn test_delete_nonexistent() {
+        let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 20];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        assert!(!store.delete(100, 30));
+        assert!(!store.delete(200, 10));
+
+        assert_eq!(store.elem_count, 2);
+    }
+
+    #[test]
+    fn test_delete_with_resize_down() {
+        let infixes: Vec<u64> = vec![];
+        let mut store = InfixStore::new_with_infixes(&infixes, 10);
+
+        for i in 0..600 {
+            store.insert(100, i);
+        }
+
+        let size_after_insert = store.size_grade();
+
+        for i in 0..500 {
+            store.delete(100, i);
+        }
+
+        assert_eq!(store.elem_count, 100);
+        assert!(store.size_grade() < size_after_insert);
     }
 }
