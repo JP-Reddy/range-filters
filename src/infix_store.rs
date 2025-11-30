@@ -303,6 +303,7 @@ impl InfixStore {
                 .copy_from_slice(&self.data[runends_start..runends_start + valid_runends_words]);
         }
 
+        // copy slots containing data
         let valid_slots_bits = self.elem_count as usize * self.remainder_size as usize;
         let valid_slots_words = (valid_slots_bits + U64_BITS - 1) / U64_BITS;
         if valid_slots_words > 0 {
@@ -314,7 +315,7 @@ impl InfixStore {
         self.size_grade = new_size_grade as u8;
     }
 
-    /// shift all slots from start_pos to the right by 1
+    /// shift all slots from start_pos to the right by 1 (for insertion)
     fn shift_slots_right(&mut self, start_pos: usize) {
         let num_slots = SCALED_SIZES[self.size_grade as usize];
         let (_, _, slots_start) = self.get_offsets();
@@ -328,7 +329,7 @@ impl InfixStore {
         }
     }
 
-    /// shift all runend bits from start_pos to the right by 1
+    /// shift all runend bits from start_pos to the right by 1 (for insertion)
     fn shift_runends_right(&mut self, start_pos: usize) {
         let num_slots = SCALED_SIZES[self.size_grade as usize];
         let (_, runends_start, _) = self.get_offsets();
