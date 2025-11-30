@@ -1,5 +1,5 @@
 use crate::U64_BITS;
-use crate::bitmap::{get_bit, rank, set_bit};
+use crate::bitmap::{get_bit, rank, select, set_bit, clear_bit};
 use std::fmt;
 
 const TARGET_SIZE: u16 = 1024;
@@ -179,6 +179,166 @@ impl InfixStore {
         // store in first word: [occupieds_popcount: 32 bits][runends_popcount: 32 bits]
         data[0] = ((occupieds_popcount as u64) << 32) | (runends_popcount as u64);
     }
+
+    /// insert a key into the infix
+    pub fn insert(&mut self, quotient: u64, remainder: u64) {
+        let mut num_slots = SCALED_SIZES[self.size_grade as usize];
+
+        // check if we have enough space
+        if self.elem_count >= num_slots {
+            self.resize_store();
+            num_slots = SCALED_SIZES[self.size_grade as usize];
+        }
+
+        // calculate offsets
+        let occupieds_start = 1;
+        let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
+        let runends_start = occupieds_start + occupieds_words;
+        let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
+        let slots_start = runends_start + runends_words;
+        let slots_words = (num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
+
+        // check if this quotient already has a run
+        let is_new_quotient = !self.is_occupied(quotient as usize);
+
+        // find position to insert new remainder
+        let occupieds_slice = &self.data[occupieds_start..occupieds_start + occupieds_words];
+        let runends_slice = &self.data[runends_start..runends_start + runends_words];
+        let run_index = rank(occupieds_slice, quotient as usize);
+        let run_start = if run_index == 0 {
+            0
+        } else {
+            select(runends_slice, run_index - 1).map(|x| x + 1).unwrap_or(0)
+        };
+
+        let insert_pos;
+        if is_new_quotient {
+            insert_pos = run_start;
+        } else {
+            // assume insertion position at the end to begin with
+            // if a run with a greater remainder is found, update position
+            let run_end = select(runends_slice, run_index)
+                .expect("error: occupied bit set but no runend found.");
+            let mut found_pos = run_end + 1;
+            for i in run_start..=run_end {
+                let val = self.read_slot(i);
+                if val > remainder {
+                    found_pos = i;
+                    break;
+                }
+            }
+            insert_pos = found_pos;
+        }
+
+        // shift the slots and runends to make room
+        if self.elem_count > 0 {
+            self.shift_slots_right(insert_pos);
+            self.shift_runends_right(insert_pos);
+        }
+
+        // insert the remainder in the new empty slot
+        let slots_slice = &mut self.data[slots_start..slots_start + slots_words];
+        Self::write_slot(slots_slice, insert_pos, remainder, self.remainder_size);
+
+        let runends_slice = &mut self.data[runends_start..runends_start + runends_words];
+        // set both runend and occupieds bits if new quotient
+        if is_new_quotient {
+            set_bit(runends_slice, insert_pos);
+            let occupieds_slice = &mut self.data[occupieds_start..occupieds_start + occupieds_words];
+            set_bit(occupieds_slice, quotient as usize);
+        } else {
+            // if inserted after the old run_end, clear and uset new run_end
+            if let Some(current_runend) = select(runends_slice, run_index) {
+                if insert_pos >= current_runend {
+                    clear_bit(runends_slice, current_runend);
+                    set_bit(runends_slice, insert_pos);
+                }
+            }
+        }
+
+        // increment element count
+        self.elem_count += 1;
+    }
+
+    fn resize_store(&mut self) {
+        // fail if already at max size
+        if self.size_grade as usize >= SIZE_GRADE_COUNT - 1 {
+            panic!("max capacity reached! cannot resize further.");
+        }
+
+        let new_size_grade = self.size_grade + 1;
+        let new_num_slots = SCALED_SIZES[new_size_grade as usize];
+
+        // initialize new data vector
+        let popcounts_words = 1;
+        let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
+        let new_runends_words = (new_num_slots as usize + U64_BITS - 1) / U64_BITS;
+        let new_slots_words = (new_num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
+        let total_words = popcounts_words + occupieds_words + new_runends_words + new_slots_words;
+        let mut new_data = vec![0u64; total_words];
+
+        // calculate new offsets
+        let occupieds_start = popcounts_words;
+        let runends_start = occupieds_start + occupieds_words;
+        let new_slots_start = runends_start + new_runends_words;
+
+        // old offsets to read from
+        let old_num_slots = SCALED_SIZES[self.size_grade as usize];
+        let old_runends_words = (old_num_slots as usize + U64_BITS - 1) / U64_BITS;
+        let old_slots_start = runends_start + old_runends_words;
+
+        // copy popcounts and occupied (fixed data)
+        let fixed_region_len = runends_start;
+        new_data[0..fixed_region_len].copy_from_slice(&self.data[0..fixed_region_len]);
+
+        // copy runends containing data
+        let valid_runends_words = (self.elem_count as usize + U64_BITS - 1) / U64_BITS;
+        if valid_runends_words > 0 {
+            new_data[runends_start..runends_start + valid_runends_words]
+                .copy_from_slice(&self.data[runends_start..runends_start + valid_runends_words]);
+        }
+
+        let valid_slots_bits = self.elem_count as usize * self.remainder_size as usize;
+        let valid_slots_words = (valid_slots_bits + U64_BITS - 1) / U64_BITS;
+        if valid_slots_words > 0 {
+            new_data[new_slots_start..new_slots_start + valid_slots_words]
+                .copy_from_slice(&self.data[old_slots_start..old_slots_start + valid_slots_words]);
+        }
+
+        self.data = new_data;
+        self.size_grade = new_size_grade as u8;
+    }
+
+    /// shift all slots from start_pos to the right by 1
+    fn shift_slots_right(&mut self, start_pos: usize) {
+        let num_slots = SCALED_SIZES[self.size_grade as usize];
+        let (_, _, slots_start) = self.get_offsets();
+        let slots_words = (num_slots as usize * self.remainder_size as usize + U64_BITS - 1) / U64_BITS;
+
+        for i in (start_pos..self.elem_count as usize).rev() {
+            let value = self.read_slot(i);
+            let slots_slice = &mut self.data[slots_start..slots_start + slots_words];
+            Self::write_slot(slots_slice, i + 1, value, self.remainder_size);
+        }
+    }
+
+    /// shift all runend bits from start_pos to the right by 1
+    fn shift_runends_right(&mut self, start_pos: usize) {
+        let num_slots = SCALED_SIZES[self.size_grade as usize];
+        let (_, runends_start, _) = self.get_offsets();
+        let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
+        let runends_slice = &mut self.data[runends_start..runends_start + runends_words];
+
+        for i in (start_pos..self.elem_count as usize).rev() {
+            let bit_value = get_bit(runends_slice, i);
+            if bit_value {
+                set_bit(runends_slice, i + 1);
+            } else {
+                clear_bit(runends_slice, i + 1);
+            }
+        }
+        clear_bit(runends_slice, start_pos);
+  }
 
     /// get memory layout offsets
     fn get_offsets(&self) -> (usize, usize, usize) {
@@ -472,5 +632,108 @@ mod tests {
             assert_eq!(store.read_slot(0), max_remainder);
             assert_eq!(store.read_slot(1), max_remainder - 1);
         }
+    }
+
+    #[test]
+    fn test_insert_middle_of_run() {
+        let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 30];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        store.insert(100, 20);
+
+        assert_eq!(store.elem_count, 3);
+        assert_eq!(store.read_slot(0), 10);
+        assert_eq!(store.read_slot(1), 20);
+        assert_eq!(store.read_slot(2), 30);
+        assert!(store.is_runend(2));
+    }
+
+    #[test]
+    fn test_insert_end_of_run() {
+        let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 20];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        store.insert(100, 30);
+
+        assert_eq!(store.elem_count, 3);
+        assert_eq!(store.read_slot(0), 10);
+        assert_eq!(store.read_slot(1), 20);
+        assert_eq!(store.read_slot(2), 30);
+        assert!(store.is_runend(2));
+        assert!(!store.is_runend(1));
+    }
+
+    #[test]
+    fn test_insert_beginning_of_run() {
+        let infixes = vec![(100u64 << 8) | 20, (100u64 << 8) | 30];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        store.insert(100, 10);
+
+        assert_eq!(store.elem_count, 3);
+        assert_eq!(store.read_slot(0), 10);
+        assert_eq!(store.read_slot(1), 20);
+        assert_eq!(store.read_slot(2), 30);
+        assert!(store.is_runend(2));
+    }
+
+    #[test]
+    fn test_insert_new_quotient() {
+        let infixes = vec![(100u64 << 8) | 10, (200u64 << 8) | 20];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        store.insert(150, 15);
+
+        assert_eq!(store.elem_count, 3);
+        assert!(store.is_occupied(100));
+        assert!(store.is_occupied(150));
+        assert!(store.is_occupied(200));
+        assert!(store.is_runend(0));
+        assert!(store.is_runend(1));
+        assert!(store.is_runend(2));
+    }
+
+    #[test]
+    fn test_insert_duplicates() {
+        let infixes = vec![(100u64 << 8) | 10];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        store.insert(100, 10);
+        store.insert(100, 10);
+
+        assert_eq!(store.elem_count, 3);
+        assert_eq!(store.read_slot(0), 10);
+        assert_eq!(store.read_slot(1), 10);
+        assert_eq!(store.read_slot(2), 10);
+    }
+
+    #[test]
+    fn test_insert_boundary_values() {
+        let infixes: Vec<u64> = vec![];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        store.insert(0, 0);
+        store.insert(1023, 255);
+        store.insert(0, 255);
+        store.insert(1023, 0);
+
+        assert_eq!(store.elem_count, 4);
+        assert!(store.is_occupied(0));
+        assert!(store.is_occupied(1023));
+    }
+
+    #[test]
+    fn test_insert_with_resize() {
+        let infixes: Vec<u64> = vec![];
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        let initial_size_grade = store.size_grade();
+
+        for i in 0..500 {
+            store.insert(100, i);
+        }
+
+        assert_eq!(store.elem_count, 500);
+        assert!(store.size_grade() > initial_size_grade);
     }
 }
