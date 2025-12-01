@@ -431,7 +431,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_point_query() {
         // Create dataset with keys that will create multiple InfixStores
         let keys: Vec<Key> = (0..3000).map(|i| i * 100).collect();
