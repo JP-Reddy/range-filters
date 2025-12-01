@@ -224,6 +224,11 @@ impl InfixStore {
             let mut found_pos = run_end + 1;
             for i in run_start..=run_end {
                 let val = self.read_slot(i);
+                // the key already exists
+                if val == remainder {
+                    return true;
+                }
+
                 if val > remainder {
                     found_pos = i;
                     break;
@@ -819,13 +824,11 @@ mod tests {
         let infixes = vec![(100u64 << 8) | 10];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        store.insert((100u64 << 8) | 10);
-        store.insert((100u64 << 8) | 10);
+        assert!(store.insert((100u64 << 8) | 10));
+        assert!(store.insert((100u64 << 8) | 10));
 
-        assert_eq!(store.elem_count, 3);
+        assert_eq!(store.elem_count, 1);
         assert_eq!(store.read_slot(0), 10);
-        assert_eq!(store.read_slot(1), 10);
-        assert_eq!(store.read_slot(2), 10);
     }
 
     #[test]
