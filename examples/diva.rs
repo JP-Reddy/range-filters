@@ -1,4 +1,3 @@
-use range_filters::U64_BITS;
 use range_filters::data_gen::generate_smooth_u16;
 use range_filters::diva::Diva;
 

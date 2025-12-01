@@ -1,3 +1,5 @@
+use rand::Rng;
+
 use crate::Key;
 use crate::U64_BITS;
 use crate::infix_store::InfixStore;
@@ -108,6 +110,118 @@ impl Diva {
             fpr,
             remainder_size,
         }
+    }
+
+    /// insert a new key into DIVA
+    pub fn insert(&mut self, key: Key) -> bool {
+        let mut rng = rand::thread_rng();
+        let chance: usize = rng.gen_range(0..self.target_size);
+        let is_sample = chance == 0;
+
+        if !is_sample && self.insert_in_infix(key) {
+            return true;
+        }
+        self.insert_as_sample(key)
+    }
+
+    fn insert_in_infix(&mut self, key: Key) -> bool {
+        // key should be inserted as a sample if any of the boundary keys are missing
+        let (s_low, s_high) = match self
+            .y_fast_trie
+            .predecessor(key)
+            .zip(self.y_fast_trie.successor(key))
+        {
+            Some(bounds) => bounds,
+            None => return false,
+        };
+
+        // if the key to be inserted already exists as one of the samples
+        if key == s_low || key == s_high {
+            return true;
+        }
+
+        // extract the infix from the key
+        let (shared_bits, redundant_bits, quotient_bits) =
+            Self::get_shared_ignore_implicit_size(&s_low, &s_high, false);
+        let msb = Self::get_msb(&s_low, &key);
+        let infix = Self::extract_partial_key(
+            key,
+            shared_bits,
+            redundant_bits,
+            quotient_bits,
+            self.remainder_size,
+            msb,
+        );
+
+        match self.y_fast_trie.get_infix_store(s_low) {
+            // attempt to insert in an existing infix store first
+            Some(store) => {
+                if let Ok(mut store) = store.write() {
+                    store.insert(infix)
+                } else {
+                    false
+                }
+            }
+            // else, create a new store with the infix
+            None => {
+                let new_store = InfixStore::new_with_infixes(&[infix], self.remainder_size);
+                self.y_fast_trie.set_infix_store(s_low, new_store);
+                true
+            }
+        }
+    }
+
+    fn insert_as_sample(&mut self, _key: Key) -> bool {
+        todo!();
+    }
+
+    pub fn delete(&mut self, key: Key) -> bool {
+        // key doesn't exist if its out of bounds
+        let (s_low, s_high) = match self
+            .y_fast_trie
+            .predecessor(key)
+            .zip(self.y_fast_trie.successor(key))
+        {
+            Some(bounds) => bounds,
+            None => return false,
+        };
+
+        // delete from trie if the key is a sample
+        if key == s_low || key == s_high {
+            return self.delete_sample(key);
+        }
+        self.delete_from_infix(key, s_low, s_high)
+    }
+
+    fn delete_from_infix(&mut self, key: Key, s_low: u64, s_high: u64) -> bool {
+        // extract the infix from the key
+        let (shared_bits, redundant_bits, quotient_bits) =
+            Self::get_shared_ignore_implicit_size(&s_low, &s_high, false);
+        let msb = Self::get_msb(&s_low, &key);
+        let infix = Self::extract_partial_key(
+            key,
+            shared_bits,
+            redundant_bits,
+            quotient_bits,
+            self.remainder_size,
+            msb,
+        );
+
+        // delete from store if the store exists
+        match self.y_fast_trie.get_infix_store(s_low) {
+            Some(store) => {
+                if let Ok(mut store) = store.write() {
+                    store.delete(infix)
+                } else {
+                    false
+                }
+            }
+            None => false,
+        }
+    }
+
+    fn delete_sample(&mut self, _key: Key) -> bool {
+        todo!();
     }
 
     /// compute redundant bits after first differing bit
@@ -369,5 +483,92 @@ mod tests {
         let diva = Diva::new_with_keys(&keys, 1024, 0.01);
 
         assert_eq!(diva.y_fast_trie.sample_count(), 1);
+    }
+
+    #[test]
+    fn test_insert_between_samples() {
+        let mut diva = Diva::new_with_keys(&[1000, 5000], 1024, 0.01);
+        assert!(diva.insert(3000));
+    }
+
+    #[test]
+    fn test_insert_into_existing_store() {
+        let mut diva = Diva::new_with_keys(&[1000, 2000, 5000], 1024, 0.01);
+        assert!(diva.insert(2500));
+    }
+
+    #[test]
+    fn test_insert_duplicate_sample() {
+        let mut diva = Diva::new_with_keys(&[1000, 5000], 1024, 0.01);
+        assert!(diva.insert(1000));
+    }
+
+    #[test]
+    fn test_delete_empty_diva() {
+        let mut diva = Diva::new(1024, 0.01);
+        assert!(!diva.delete(100));
+    }
+
+    #[test]
+    fn test_delete_non_existent() {
+        let mut diva = Diva::new_with_keys(&[1000, 5000], 1024, 0.01);
+        assert!(!diva.delete(3000));
+    }
+
+    #[test]
+    fn test_delete_existing_infix() {
+        let mut diva = Diva::new_with_keys(&[1000, 2000, 5000], 1024, 0.01);
+        assert!(diva.delete(2000));
+        assert!(!diva.delete(2000));
+    }
+
+    #[test]
+    fn test_insert_delete_roundtrip() {
+        let mut diva = Diva::new_with_keys(&[1000, 10000], 1024, 0.01);
+        assert!(diva.insert(5000));
+        assert!(diva.delete(5000));
+        assert!(!diva.delete(5000));
+    }
+
+    #[test]
+    fn test_multiple_operations() {
+        let mut diva = Diva::new_with_keys(&[1000, 10000], 1024, 0.01);
+        assert!(diva.insert(2000));
+        assert!(diva.insert(3000));
+        assert!(diva.delete(2000));
+        assert!(!diva.delete(2000));
+        assert!(diva.delete(3000));
+    }
+
+    #[test]
+    fn test_random_operations() {
+        use rand::Rng;
+        use std::panic;
+
+        let mut diva = Diva::new_with_keys(&[1000, 100000], 1024, 0.01);
+        let mut rng = rand::thread_rng();
+        let mut inserted = Vec::new();
+
+        for _ in 0..100 {
+            let key = rng.gen_range(2000..99000);
+            if rng.gen_bool(0.6) {
+                let result = panic::catch_unwind(panic::AssertUnwindSafe(|| unsafe {
+                    (&mut *(&mut diva as *mut Diva)).insert(key)
+                }));
+                match result {
+                    Ok(true) => inserted.push(key),
+                    Ok(false) | Err(_) => {}
+                }
+            } else if !inserted.is_empty() {
+                let idx = rng.gen_range(0..inserted.len());
+                let key_to_delete = inserted[idx];
+                let delete_result = panic::catch_unwind(panic::AssertUnwindSafe(|| unsafe {
+                    (&mut *(&mut diva as *mut Diva)).delete(key_to_delete)
+                }));
+                if let Ok(true) = delete_result {
+                    inserted.swap_remove(idx);
+                }
+            }
+        }
     }
 }

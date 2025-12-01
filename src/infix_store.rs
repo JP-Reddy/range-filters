@@ -181,7 +181,7 @@ impl InfixStore {
     }
 
     /// insert a key into the infix store
-    pub fn insert(&mut self, quotient: u64, remainder: u64) -> bool {
+    pub fn insert(&mut self, infix: u64) -> bool {
         let mut num_slots = SCALED_SIZES[self.size_grade as usize];
 
         // check if we have enough space and resize if possible
@@ -192,6 +192,7 @@ impl InfixStore {
             num_slots = SCALED_SIZES[self.size_grade as usize];
         }
 
+        let (quotient, remainder) = Self::split_infix(infix, self.remainder_size);
         let (occupieds_start, runends_start, slots_start) = self.get_offsets();
         let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
         let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
@@ -212,6 +213,7 @@ impl InfixStore {
                 .map(|x| x + 1)
                 .unwrap_or(0)
         };
+        let run_end = select(runends_slice, run_index).unwrap_or(self.elem_count as usize);
 
         let insert_pos;
         if is_new_quotient {
@@ -219,8 +221,6 @@ impl InfixStore {
         } else {
             // assume insertion position at the end to begin with
             // if a run with a greater remainder is found, update position
-            let run_end = select(runends_slice, run_index)
-                .expect("error: occupied bit set but no runend found.");
             let mut found_pos = run_end + 1;
             for i in run_start..=run_end {
                 let val = self.read_slot(i);
@@ -250,23 +250,21 @@ impl InfixStore {
                 &mut self.data[occupieds_start..occupieds_start + occupieds_words];
             set_bit(occupieds_slice, quotient as usize);
         } else {
-            // if inserted after the old run_end, clear and uset new run_end
-            if let Some(current_runend) = select(runends_slice, run_index) {
-                if insert_pos >= current_runend {
-                    clear_bit(runends_slice, current_runend);
-                    set_bit(runends_slice, insert_pos);
-                }
+            // if inserted after the old run_end, clear and set new run_end
+            if insert_pos >= run_end {
+                clear_bit(runends_slice, run_end);
+                set_bit(runends_slice, insert_pos);
             }
         }
         // increment element count
         self.elem_count += 1;
-
         true
     }
 
     /// delete a key from the infix store
-    pub fn delete(&mut self, quotient: u64, remainder: u64) -> bool {
+    pub fn delete(&mut self, infix: u64) -> bool {
         // check if the quotient exists
+        let (quotient, remainder) = Self::split_infix(infix, self.remainder_size);
         if !self.is_occupied(quotient as usize) {
             return false;
         }
@@ -290,7 +288,7 @@ impl InfixStore {
                 .unwrap_or(0)
         };
         let run_end =
-            select(runends_slice, run_index).expect("error: occupied bit set but no runend found.");
+            select(runends_slice, run_index).expect("panic: occupied bit set but no runend found.");
 
         // find the slot position to be deleted
         let mut del_pos = None;
@@ -762,7 +760,7 @@ mod tests {
         let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 30];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        store.insert(100, 20);
+        store.insert((100u64 << 8) | 20);
 
         assert_eq!(store.elem_count, 3);
         assert_eq!(store.read_slot(0), 10);
@@ -776,7 +774,7 @@ mod tests {
         let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 20];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        store.insert(100, 30);
+        store.insert((100u64 << 8) | 30);
 
         assert_eq!(store.elem_count, 3);
         assert_eq!(store.read_slot(0), 10);
@@ -791,7 +789,7 @@ mod tests {
         let infixes = vec![(100u64 << 8) | 20, (100u64 << 8) | 30];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        store.insert(100, 10);
+        store.insert((100u64 << 8) | 10);
 
         assert_eq!(store.elem_count, 3);
         assert_eq!(store.read_slot(0), 10);
@@ -805,7 +803,7 @@ mod tests {
         let infixes = vec![(100u64 << 8) | 10, (200u64 << 8) | 20];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        store.insert(150, 15);
+        store.insert((150u64 << 8) | 15);
 
         assert_eq!(store.elem_count, 3);
         assert!(store.is_occupied(100));
@@ -821,8 +819,8 @@ mod tests {
         let infixes = vec![(100u64 << 8) | 10];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        store.insert(100, 10);
-        store.insert(100, 10);
+        store.insert((100u64 << 8) | 10);
+        store.insert((100u64 << 8) | 10);
 
         assert_eq!(store.elem_count, 3);
         assert_eq!(store.read_slot(0), 10);
@@ -835,10 +833,10 @@ mod tests {
         let infixes: Vec<u64> = vec![];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        store.insert(0, 0);
-        store.insert(1023, 255);
-        store.insert(0, 255);
-        store.insert(1023, 0);
+        store.insert((0u64 << 8) | 0);
+        store.insert((1023u64 << 8) | 255);
+        store.insert((0u64 << 8) | 255);
+        store.insert((1023u64 << 8) | 0);
 
         assert_eq!(store.elem_count, 4);
         assert!(store.is_occupied(0));
@@ -853,7 +851,7 @@ mod tests {
         let initial_size_grade = store.size_grade();
 
         for i in 0..500 {
-            store.insert(100, i);
+            store.insert((100u64 << 8) | i);
         }
 
         assert_eq!(store.elem_count, 500);
@@ -865,7 +863,7 @@ mod tests {
         let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 20, (100u64 << 8) | 30];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        assert!(store.delete(100, 20));
+        assert!(store.delete((100u64 << 8) | 20));
 
         assert_eq!(store.elem_count, 2);
         assert_eq!(store.read_slot(0), 10);
@@ -878,7 +876,7 @@ mod tests {
         let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 20, (100u64 << 8) | 30];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        assert!(store.delete(100, 30));
+        assert!(store.delete((100u64 << 8) | 30));
 
         assert_eq!(store.elem_count, 2);
         assert_eq!(store.read_slot(0), 10);
@@ -892,7 +890,7 @@ mod tests {
         let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 20, (100u64 << 8) | 30];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        assert!(store.delete(100, 10));
+        assert!(store.delete((100u64 << 8) | 10));
 
         assert_eq!(store.elem_count, 2);
         assert_eq!(store.read_slot(0), 20);
@@ -905,7 +903,7 @@ mod tests {
         let infixes = vec![(100u64 << 8) | 10, (200u64 << 8) | 20];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        assert!(store.delete(100, 10));
+        assert!(store.delete((100u64 << 8) | 10));
 
         assert_eq!(store.elem_count, 1);
         assert!(!store.is_occupied(100));
@@ -919,8 +917,8 @@ mod tests {
         let infixes = vec![(100u64 << 8) | 10, (100u64 << 8) | 20];
         let mut store = InfixStore::new_with_infixes(&infixes, 8);
 
-        assert!(!store.delete(100, 30));
-        assert!(!store.delete(200, 10));
+        assert!(!store.delete((100u64 << 8) | 30));
+        assert!(!store.delete((200u64 << 8) | 10));
 
         assert_eq!(store.elem_count, 2);
     }
@@ -931,13 +929,13 @@ mod tests {
         let mut store = InfixStore::new_with_infixes(&infixes, 10);
 
         for i in 0..600 {
-            store.insert(100, i);
+            store.insert((100u64 << 10) | i);
         }
 
         let size_after_insert = store.size_grade();
 
         for i in 0..500 {
-            store.delete(100, i);
+            store.delete((100u64 << 10) | i);
         }
 
         assert_eq!(store.elem_count, 100);
