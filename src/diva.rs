@@ -228,6 +228,9 @@ impl Diva {
         let shift_amount = 64 - start_bit - bits_to_extract;
         let extracted = (key >> shift_amount) & ((1 << bits_to_extract) - 1);
 
+        let total_bits_needed = quotient_bits + remainder_bits;
+        let extracted = extracted << (total_bits_needed - bits_to_extract);
+
         // combine: [MSB: 1 bit][quotient: quotient_bits][remainder: remainder_bits]
         let result = ((msb as Key) << (quotient_bits + remainder_bits)) | extracted;
 
