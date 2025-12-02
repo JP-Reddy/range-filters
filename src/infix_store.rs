@@ -540,6 +540,109 @@ impl InfixStore {
     pub fn pretty_print(&self) {
         print!("{}", self);
     }
+
+    /// Point query: check if a key exists in this InfixStore
+    /// Uses the same helper methods as Diva construction to ensure consistency
+    ///
+    /// # Arguments
+    /// * `query_key` - The key to search for
+    /// * `predecessor_key` - The predecessor sample key
+    /// * `successor_key` - The successor sample key
+    /// * `remainder_size` - Number of bits in remainder
+    pub fn point_query(&self, query_key: u64, predecessor_key: u64, successor_key: u64, remainder_size: u8) -> bool {
+        println!("InfixStore::point_query for key {}, pred {}, succ {}", query_key, predecessor_key, successor_key);
+
+        // Use the exact same helper methods from Diva for consistency
+        use crate::diva::Diva;
+
+        // Step 1: Convert query key to infix using the same extraction logic as construction
+        let (shared_prefix_len, redundant_bits, quotient_bits) =
+            Diva::get_shared_ignore_implicit_size(&predecessor_key, &successor_key, false);
+
+        println!("  Extraction params: shared={}, redundant={}, quotient={}",
+                 shared_prefix_len, redundant_bits, quotient_bits);
+
+        let infix = Diva::extract_partial_key(
+            query_key,
+            shared_prefix_len,
+            redundant_bits,
+            quotient_bits,
+            remainder_size,
+        );
+
+        println!("  Query key infix: {}", infix);
+
+        // Step 2: Split infix into quotient and remainder
+        let (quotient, remainder) = Self::split_infix(infix, remainder_size);
+
+        println!("  Quotient: {}, Remainder: {}", quotient, remainder);
+
+        // Step 3: Check if quotient exists in occupieds bitmap
+        if !self.is_occupied(quotient as usize) {
+            println!("  Quotient {} not occupied", quotient);
+            return false;
+        }
+
+        println!("  Quotient {} is occupied, searching run...", quotient);
+
+        // Step 4: Find the run for this quotient and scan for exact remainder match
+        let result = self.find_remainder_in_run(quotient as usize, remainder);
+        println!("  Run search result: {}", result);
+        result
+    }
+
+    /// Find a specific remainder value within a quotient's run
+    fn find_remainder_in_run(&self, quotient: usize, target_remainder: u64) -> bool {
+        println!("    find_remainder_in_run: quotient={}, target_remainder={}", quotient, target_remainder);
+
+        // Get the rank of this quotient (how many quotients before it)
+        let (occupieds_start, runends_start, _) = self.get_offsets();
+        let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
+        let occupieds_slice = &self.data[occupieds_start..occupieds_start + occupieds_words];
+
+        let rank_result = rank(occupieds_slice, quotient);
+
+        println!("    rank({}) = {}", quotient, rank_result);
+
+        // Use select to find the end position of this run
+        let num_slots = SCALED_SIZES[self.size_grade as usize];
+        let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
+        let runends_slice = &self.data[runends_start..runends_start + runends_words];
+
+        let run_end_pos = match select(runends_slice, rank_result) {
+            Some(pos) => {
+                println!("    select({}) = {}", rank_result, pos);
+                pos
+            },
+            None => {
+                println!("    select({}) returned None", rank_result);
+                return false; // run not found
+            }
+        };
+
+        // Scan backwards from run end to find the start of this run
+        let mut pos = run_end_pos;
+        println!("    Scanning run from pos {} backwards:", pos);
+        loop {
+            let remainder = self.read_slot(pos);
+            println!("      pos {}: remainder = {}", pos, remainder);
+            if remainder == target_remainder {
+                println!("    Found target remainder at pos {}", pos);
+                return true;
+            }
+
+            // Check if we've reached the beginning of this run
+            if pos == 0 || self.is_runend(pos - 1) {
+                println!("    Reached beginning of run at pos {}", pos);
+                break;
+            }
+
+            pos -= 1;
+        }
+
+        println!("    Target remainder {} not found in run", target_remainder);
+        false
+    }
 }
 
 impl fmt::Display for InfixStore {
