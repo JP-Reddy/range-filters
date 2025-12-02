@@ -215,7 +215,7 @@ impl Diva {
         let bits_to_extract = (1 + quotient_bits + remainder_bits).min(remaining_bits);
 
         if bits_to_extract == 0 {
-t            return 0;
+            return 0;
         }
 
         let shift_amount = 64 - start_bit - bits_to_extract;
