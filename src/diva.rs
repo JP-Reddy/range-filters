@@ -82,18 +82,21 @@ impl Diva {
 
             // extract infixes from intermediate keys
             let mut infixes = Vec::new();
+            println!("Processing keys between {} and {} (shared={}, redundant={}, quotient={})",
+                     predecessor, successor, shared_prefix_len, redundant_bits, quotient_bits);
             for key in intermediate_keys {
-                let key_msb = Self::get_msb(&predecessor, &key);
                 let infix = Self::extract_partial_key(
                     key,
                     shared_prefix_len,
                     redundant_bits,
                     quotient_bits,
                     remainder_size,
-                    key_msb,
                 );
+                println!("Key {} ({:064b}) -> infix {} ({:064b})",
+                         key, key, infix, infix);
                 infixes.push(infix);
             }
+            println!("Infixes before InfixStore creation: {:?}", infixes);
 
             // create InfixStore and attach to predecessor sample
             if !infixes.is_empty() {
@@ -141,7 +144,7 @@ impl Diva {
 
     /// compute shared prefix, redundant bits, and quotient size
     /// returns: (shared_prefix_len, redundant_bits, quotient_bits)
-    fn get_shared_ignore_implicit_size(
+    pub fn get_shared_ignore_implicit_size(
         key_1: &Key,
         key_2: &Key,
         use_redundant_bits: bool,
@@ -188,49 +191,41 @@ impl Diva {
     }
 
     /// extract partial key (infix) from a full key
-    /// returns: MSB | quotient_bits | remainder_bits
-    ///
+    /// returns: infix = quotient_bits | remainder_bits
     /// # Arguments
     /// * `key` - The full key to extract from
     /// * `shared_prefix_len` - Number of shared prefix bits to skip
-    /// * `redundant_bits` - Number of redundant bits to skip
+    /// * `redundant_bits` - Number of redundant bits to skip (currently always 0)
     /// * `quotient_bits` - Number of quotient bits to extract (implicit)
     /// * `remainder_bits` - Number of remainder bits to extract (explicit)
-    /// * `msb` - The first differing bit (0 or 1)
-    fn extract_partial_key(
+    pub fn extract_partial_key(
         key: Key,
         shared_prefix_len: u8,
         redundant_bits: u8,
         quotient_bits: u8,
         remainder_bits: u8,
-        msb: u8,
     ) -> Key {
-        // position where extraction starts (after shared + first_diff + redundant)
-        let start_bit = shared_prefix_len + 1 + redundant_bits;
+        let start_bit = shared_prefix_len + redundant_bits;
 
         if start_bit >= 64 {
-            return msb as Key;
+            return 0;
         }
 
-        // extract quotient + remainder bits
         let remaining_bits = 64 - start_bit;
-        let bits_to_extract = (quotient_bits + remainder_bits).min(remaining_bits);
+        let bits_to_extract = (1 + quotient_bits + remainder_bits).min(remaining_bits);
 
         if bits_to_extract == 0 {
-            return msb as Key;
+t            return 0;
         }
 
         let shift_amount = 64 - start_bit - bits_to_extract;
         let extracted = (key >> shift_amount) & ((1 << bits_to_extract) - 1);
 
-        // combine: [MSB: 1 bit][quotient: quotient_bits][remainder: remainder_bits]
-        let result = ((msb as Key) << (quotient_bits + remainder_bits)) | extracted;
-
-        result
+        extracted
     }
 
     /// get MSB (first differing bit) between predecessor and successor
-    fn get_msb(key_1: &Key, key_2: &Key) -> u8 {
+    pub fn get_msb(key_1: &Key, key_2: &Key) -> u8 {
         let shared = longest_common_prefix_length(*key_1, *key_2);
 
         if shared >= 64 {
@@ -252,6 +247,35 @@ impl Diva {
 
     pub fn pretty_print(&self) {
         print!("{}", self);
+    }
+
+    /// Point lookup: check if a key exists in the filter
+    /// Returns true if key might exist (with FPR), false if definitely doesn't exist
+    pub fn contains(&self, key: Key) -> bool {
+        // Step 1: Check Y-Fast Trie directly (samples)
+        if self.y_fast_trie.contains(key) {
+            return true;
+        }
+
+        // Step 2: Find predecessor sample to locate the appropriate InfixStore
+        if let Some(predecessor_infix_store) = self.y_fast_trie.predecessor_infix_store(key) {
+            // Step 3: Find predecessor and successor samples to get infix conversion params
+            if let Some(predecessor_key) = self.y_fast_trie.predecessor(key) {
+                if let Some(successor_key) = self.y_fast_trie.successor(key) {
+                    println!("Querying key {}, pred: {}, succ: {}", key, predecessor_key, successor_key);
+                    // Step 4: Query the InfixStore
+                    if let Ok(store) = predecessor_infix_store.read() {
+                        let result = store.point_query(key, predecessor_key, successor_key, self.remainder_size);
+                        println!("InfixStore query result for key {}: {}", key, result);
+                        return result;
+                    }
+                }
+            }
+        }
+
+        println!("No predecessor InfixStore found for key {}", key);
+
+        false
     }
 }
 
@@ -369,5 +393,60 @@ mod tests {
         let diva = Diva::new_with_keys(&keys, 1024, 0.01);
 
         assert_eq!(diva.y_fast_trie.sample_count(), 1);
+    }
+
+    #[test]
+    fn test_point_query_simple() {
+        // Simple test case with small numbers
+        let keys: Vec<Key> = vec![100, 200, 300, 400, 500, 600, 700];
+        let target_size = 1024; // This will create samples at 100, 400, 700
+        let diva = Diva::new_with_keys(&keys, target_size, 0.01);
+
+        println!("Created Diva with {} keys", keys.len());
+        diva.pretty_print();
+
+        // Test that all original keys are found
+        for &key in &keys {
+            println!("Testing key: {}", key);
+            let found = diva.contains(key);
+            assert!(found, "Key {} should be found", key);
+        }
+
+        // Test some keys that shouldn't exist
+        assert!(!diva.contains(150), "Key 150 should not be found");
+        assert!(!diva.contains(250), "Key 250 should not be found");
+    }
+
+    #[test]
+    #[ignore]
+    fn test_point_query() {
+        // Create dataset with keys that will create multiple InfixStores
+        let keys: Vec<Key> = (0..3000).map(|i| i * 100).collect();
+        let target_size = 1000;
+        let diva = Diva::new_with_keys(&keys, target_size, 0.01);
+
+        // Test that all original keys are found
+        for &key in &keys {
+            assert!(diva.contains(key), "Key {} should be found", key);
+        }
+
+        // Test some keys that shouldn't exist
+        assert!(!diva.contains(50), "Key 50 should not be found");
+        assert!(!diva.contains(150), "Key 150 should not be found");
+        assert!(!diva.contains(99999), "Key 99999 should not be found");
+    }
+
+    #[test]
+    fn test_point_query_with_samples() {
+        // Test that sampled keys are found via Y-Fast Trie directly
+        let keys: Vec<Key> = vec![100, 200, 300, 400, 500];
+        let target_size = 2;
+        let diva = Diva::new_with_keys(&keys, target_size, 0.01);
+
+        // Keys 100, 300, 500 should be samples
+        // Keys 200, 400 should be in InfixStores
+        for &key in &keys {
+            assert!(diva.contains(key), "Key {} should be found", key);
+        }
     }
 }
