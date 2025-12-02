@@ -146,14 +146,13 @@ impl Diva {
         // extract the infix from the key
         let (shared_bits, redundant_bits, quotient_bits) =
             Self::get_shared_ignore_implicit_size(&s_low, &s_high, false);
-        let msb = Self::get_msb(&s_low, &key);
+
         let infix = Self::extract_partial_key(
             key,
             shared_bits,
             redundant_bits,
             quotient_bits,
-            self.remainder_size,
-            msb,
+            self.remainder_size
         );
 
         match self.y_fast_trie.get_infix_store(s_low) {
@@ -200,14 +199,12 @@ impl Diva {
         // extract the infix from the key
         let (shared_bits, redundant_bits, quotient_bits) =
             Self::get_shared_ignore_implicit_size(&s_low, &s_high, false);
-        let msb = Self::get_msb(&s_low, &key);
         let infix = Self::extract_partial_key(
             key,
             shared_bits,
             redundant_bits,
             quotient_bits,
-            self.remainder_size,
-            msb,
+            self.remainder_size
         );
 
         // delete from store if the store exists
