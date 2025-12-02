@@ -276,17 +276,15 @@ impl InfixStore {
         println!("  Extraction params: shared={}, redundant={}, quotient={}",
                  shared_prefix_len, redundant_bits, quotient_bits);
 
-        let key_msb = Diva::get_msb(&predecessor_key, &query_key);
         let infix = Diva::extract_partial_key(
             query_key,
             shared_prefix_len,
             redundant_bits,
             quotient_bits,
             remainder_size,
-            key_msb,
         );
 
-        println!("  Query key infix: {} (MSB: {})", infix, key_msb);
+        println!("  Query key infix: {}", infix);
 
         // Step 2: Split infix into quotient and remainder
         let (quotient, remainder) = Self::split_infix(infix, remainder_size);

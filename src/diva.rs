@@ -85,17 +85,15 @@ impl Diva {
             println!("Processing keys between {} and {} (shared={}, redundant={}, quotient={})",
                      predecessor, successor, shared_prefix_len, redundant_bits, quotient_bits);
             for key in intermediate_keys {
-                let key_msb = Self::get_msb(&predecessor, &key);
                 let infix = Self::extract_partial_key(
                     key,
                     shared_prefix_len,
                     redundant_bits,
                     quotient_bits,
                     remainder_size,
-                    key_msb,
                 );
-                println!("Key {} ({:064b}) -> infix {} ({:064b}) (MSB: {})",
-                         key, key, infix, infix, key_msb);
+                println!("Key {} ({:064b}) -> infix {} ({:064b})",
+                         key, key, infix, infix);
                 infixes.push(infix);
             }
             println!("Infixes before InfixStore creation: {:?}", infixes);
@@ -193,45 +191,37 @@ impl Diva {
     }
 
     /// extract partial key (infix) from a full key
-    /// returns: MSB | quotient_bits | remainder_bits
-    ///
+    /// returns: infix = quotient_bits | remainder_bits
     /// # Arguments
     /// * `key` - The full key to extract from
     /// * `shared_prefix_len` - Number of shared prefix bits to skip
-    /// * `redundant_bits` - Number of redundant bits to skip
+    /// * `redundant_bits` - Number of redundant bits to skip (currently always 0)
     /// * `quotient_bits` - Number of quotient bits to extract (implicit)
     /// * `remainder_bits` - Number of remainder bits to extract (explicit)
-    /// * `msb` - The first differing bit (0 or 1)
     pub fn extract_partial_key(
         key: Key,
         shared_prefix_len: u8,
         redundant_bits: u8,
         quotient_bits: u8,
         remainder_bits: u8,
-        msb: u8,
     ) -> Key {
-        // position where extraction starts (after shared + first_diff + redundant)
-        let start_bit = shared_prefix_len + 1 + redundant_bits;
+        let start_bit = shared_prefix_len + redundant_bits;
 
         if start_bit >= 64 {
-            return msb as Key;
+            return 0;
         }
 
-        // extract quotient + remainder bits
         let remaining_bits = 64 - start_bit;
-        let bits_to_extract = (quotient_bits + remainder_bits).min(remaining_bits);
+        let bits_to_extract = (1 + quotient_bits + remainder_bits).min(remaining_bits);
 
         if bits_to_extract == 0 {
-            return msb as Key;
+t            return 0;
         }
 
         let shift_amount = 64 - start_bit - bits_to_extract;
         let extracted = (key >> shift_amount) & ((1 << bits_to_extract) - 1);
 
-        // combine: [MSB: 1 bit][quotient: quotient_bits][remainder: remainder_bits]
-        let result = ((msb as Key) << (quotient_bits + remainder_bits)) | extracted;
-
-        result
+        extracted
     }
 
     /// get MSB (first differing bit) between predecessor and successor
