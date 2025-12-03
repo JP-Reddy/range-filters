@@ -2,6 +2,13 @@
 name = "range-filters"
 version = "0.1.0"
 edition = "2024"
+authors = ["JP Reddy", "Mandy Alimaa", "Sarthak Khattar"]
+description = "High-performance range filter implementation - DIVA (VLDB 2025 Best Research Paper)"
+license = "MIT"
+repository = "https://github.com/JP-Reddy/range-filters"
+readme = "README.md"
+keywords = ["range-filter", "data-structures", "bloom-filter", "database", "diva"]
+categories = ["data-structures", "algorithms"]
 
 [dependencies]
 dashmap = "6.1.0"
