@@ -550,6 +550,29 @@ impl InfixStore {
         print!("{}", self);
     }
 
+    /// Helper function to convert a key to infix using consistent extraction logic
+    /// Returns the infix value for the given key within the predecessor/successor range
+    fn convert_key_to_infix(
+        &self,
+        key: u64,
+        predecessor_key: u64,
+        successor_key: u64,
+        remainder_size: u8,
+    ) -> u64 {
+        use crate::diva::Diva;
+
+        let (shared_prefix_len, redundant_bits, quotient_bits) =
+            Diva::get_shared_ignore_implicit_size(&predecessor_key, &successor_key, false);
+
+        Diva::extract_partial_key(
+            key,
+            shared_prefix_len,
+            redundant_bits,
+            quotient_bits,
+            remainder_size,
+        )
+    }
+
     /// Point query: check if a key exists in this InfixStore
     /// Uses the same helper methods as Diva construction to ensure consistency
     ///
@@ -558,31 +581,26 @@ impl InfixStore {
     /// * `predecessor_key` - The predecessor sample key
     /// * `successor_key` - The successor sample key
     /// * `remainder_size` - Number of bits in remainder
-    pub fn point_query(&self, query_key: u64, predecessor_key: u64, successor_key: u64, remainder_size: u8) -> bool {
-        println!("InfixStore::point_query for key {}, pred {}, succ {}", query_key, predecessor_key, successor_key);
-
-        // Use the exact same helper methods from Diva for consistency
-        use crate::diva::Diva;
-
-        // Step 1: Convert query key to infix using the same extraction logic as construction
-        let (shared_prefix_len, redundant_bits, quotient_bits) =
-            Diva::get_shared_ignore_implicit_size(&predecessor_key, &successor_key, false);
-
-        // println!("  Extraction params: shared={}, redundant={}, quotient={}",
-        //          shared_prefix_len, redundant_bits, quotient_bits);
-
-        let infix = Diva::extract_partial_key(
-            query_key,
-            shared_prefix_len,
-            redundant_bits,
-            quotient_bits,
-            remainder_size,
+    pub fn point_query(
+        &self,
+        query_key: u64,
+        predecessor_key: u64,
+        successor_key: u64,
+        remainder_size: u8,
+    ) -> bool {
+        println!(
+            "InfixStore::point_query for key {}, pred {}, succ {}",
+            query_key, predecessor_key, successor_key
         );
+
+        // Step 1: Convert query key to infix using helper function
+        let infix =
+            self.convert_key_to_infix(query_key, predecessor_key, successor_key, remainder_size);
 
         println!("  Query key infix: {}", infix);
 
         // Step 2: Split infix into quotient and remainder
-        let (quotient, remainder) = Self::split_infix(infix, quotient_bits, remainder_size);
+        let (quotient, remainder) = Self::split_infix(infix, self.quotient_size, self.remainder_size);
 
         println!("  Quotient: {}, Remainder: {}", quotient, remainder);
 
@@ -602,8 +620,294 @@ impl InfixStore {
 
     /// Find a specific remainder value within a quotient's run
     fn find_remainder_in_run(&self, quotient: usize, target_remainder: u64) -> bool {
-        println!("    find_remainder_in_run: quotient={}, target_remainder={}", quotient, target_remainder);
+        println!(
+            "    find_remainder_in_run: quotient={}, target_remainder={}",
+            quotient, target_remainder
+        );
 
+        let (run_start, run_end) = match self.get_run_bounds(quotient) {
+            Some(bounds) => bounds,
+            None => {
+                println!("    No run found for quotient {}", quotient);
+                return false;
+            }
+        };
+
+        println!("    Scanning run positions {} to {}", run_start, run_end);
+
+        for pos in run_start..=run_end {
+            let remainder = self.read_slot(pos);
+            println!("      pos {}: remainder = {}", pos, remainder);
+            if remainder == target_remainder {
+                println!("    Found target remainder at pos {}", pos);
+                return true;
+            }
+        }
+
+        println!("    Target remainder {} not found in run", target_remainder);
+        false
+    }
+
+    /// Range query: check if any key exists in the given range [start_key, end_key] (inclusive)
+    ///
+    /// # Arguments
+    /// * `start_key` - Start of the query range
+    /// * `end_key` - End of the query range
+    /// * `predecessor_key` - The predecessor sample key
+    /// * `successor_key` - The successor sample key
+    /// * `remainder_size` - Number of bits in remainder
+    pub fn range_query(
+        &self,
+        start_key: u64,
+        end_key: u64,
+        predecessor_key: u64,
+        successor_key: u64,
+        remainder_size: u8,
+    ) -> bool {
+        if start_key > end_key {
+            return false;
+        }
+
+        println!(
+            "InfixStore::range_query for range [{}, {}], pred {}, succ {}",
+            start_key, end_key, predecessor_key, successor_key
+        );
+
+        // Step 1: Convert both endpoints to infixes using helper function
+        let start_infix =
+            self.convert_key_to_infix(start_key, predecessor_key, successor_key, remainder_size);
+        let end_infix =
+            self.convert_key_to_infix(end_key, predecessor_key, successor_key, remainder_size);
+
+        println!("  Start: key {} -> infix {}", start_key, start_infix);
+        println!("  End: key {} -> infix {}", end_key, end_infix);
+
+        // Step 2: Split infixes into quotients and remainders
+        let (start_quotient, start_remainder) = Self::split_infix(start_infix, self.quotient_size, remainder_size);
+        let (end_quotient, end_remainder) = Self::split_infix(end_infix, self.quotient_size, remainder_size);
+
+        println!(
+            "  Start: quotient={}, remainder={}",
+            start_quotient, start_remainder
+        );
+        println!(
+            "  End: quotient={}, remainder={}",
+            end_quotient, end_remainder
+        );
+
+        // Step 3: Handle the two main cases
+        if start_quotient == end_quotient {
+            // Case 1: Range spans single quotient
+            self.query_single_quotient_range(
+                start_quotient as usize,
+                start_remainder,
+                end_remainder,
+            )
+        } else {
+            // Case 2: Range spans multiple quotients
+            self.query_multiple_quotient_range(
+                start_quotient as usize,
+                start_remainder,
+                end_quotient as usize,
+                end_remainder,
+            )
+        }
+    }
+
+    /// Handle range query when both endpoints map to the same quotient
+    fn query_single_quotient_range(
+        &self,
+        quotient: usize,
+        start_remainder: u64,
+        end_remainder: u64,
+    ) -> bool {
+        println!(
+            "    Single quotient {} range: remainder [{}, {}]",
+            quotient, start_remainder, end_remainder
+        );
+
+        // Check if quotient exists
+        if !self.is_occupied(quotient) {
+            println!("    Quotient {} not occupied", quotient);
+            return false;
+        }
+
+        // Find the run and scan for any remainder in the range [start_remainder, end_remainder]
+        self.scan_run_for_range(quotient, start_remainder, end_remainder)
+    }
+
+    /// Handle range query when endpoints map to different quotients
+    fn query_multiple_quotient_range(
+        &self,
+        start_quotient: usize,
+        start_remainder: u64,
+        end_quotient: usize,
+        end_remainder: u64,
+    ) -> bool {
+        println!(
+            "    Multiple quotients: {} to {}",
+            start_quotient, end_quotient
+        );
+
+        // Step 1: Check for any occupied quotients strictly between start_quotient and end_quotient
+        for quotient in (start_quotient + 1)..end_quotient {
+            if self.is_occupied(quotient) {
+                println!("    Found occupied quotient {} between endpoints", quotient);
+                return true; // All remainders in this quotient are within range
+            }
+        }
+
+        // Step 2: Check start quotient for remainders >= start_remainder
+        if self.is_occupied(start_quotient) {
+            if self.scan_run_from_remainder(start_quotient, start_remainder, true) {
+                println!(
+                    "    Found remainder >= {} in start quotient {}",
+                    start_remainder, start_quotient
+                );
+                return true;
+            }
+        }
+
+        // Step 3: Check end quotient for remainders <= end_remainder
+        if self.is_occupied(end_quotient) {
+            if self.scan_run_from_remainder(end_quotient, end_remainder, false) {
+                println!(
+                    "    Found remainder <= {} in end quotient {}",
+                    end_remainder, end_quotient
+                );
+                return true;
+            }
+        }
+
+        println!("    No remainders found in range");
+        false
+    }
+
+    /// Scan a quotient's run for any remainder in the range [start_remainder, end_remainder]
+    /// Uses paper's right-to-left scanning optimization with early termination
+    fn scan_run_for_range(
+        &self,
+        quotient: usize,
+        start_remainder: u64,
+        end_remainder: u64,
+    ) -> bool {
+        let (run_start, run_end) = match self.get_run_bounds(quotient) {
+            Some(bounds) => bounds,
+            None => return false,
+        };
+
+        println!(
+            "      Scanning run positions {} to {} for remainder range [{}, {}] (right-to-left optimization)",
+            run_start, run_end, start_remainder, end_remainder
+        );
+
+        // Paper's optimization: scan right-to-left (backward) from run end
+        // This leverages the fact that remainders are sorted within runs
+        let mut pos = run_end;
+        loop {
+            let remainder = self.read_slot(pos);
+
+            println!("        Checking position {} with remainder {}", pos, remainder);
+
+            // Check if remainder is in our target range
+            if remainder >= start_remainder && remainder <= end_remainder {
+                println!("      Found remainder {} in range at position {}", remainder, pos);
+                return true;
+            }
+
+            // Early termination optimization: if remainder < start_remainder,
+            // all previous remainders will also be smaller (due to sorted order)
+            if remainder < start_remainder {
+                println!(
+                    "      Early termination: remainder {} < start_remainder {}, stopping scan",
+                    remainder, start_remainder
+                );
+                return false;
+            }
+
+            // Continue to previous position if we haven't reached the start
+            if pos == run_start {
+                break;
+            }
+            pos -= 1;
+        }
+
+        println!("      No remainder found in range [{}, {}]", start_remainder, end_remainder);
+        false
+    }
+
+    /// Scan a quotient's run for remainders >= threshold (if ascending) or <= threshold (if !ascending)
+    /// Uses optimized scanning direction based on query type
+    fn scan_run_from_remainder(
+        &self,
+        quotient: usize,
+        threshold_remainder: u64,
+        ascending: bool,
+    ) -> bool {
+        let (run_start, run_end) = match self.get_run_bounds(quotient) {
+            Some(bounds) => bounds,
+            None => return false,
+        };
+
+        println!(
+            "      Scanning run positions {} to {} for remainder {} {} threshold (optimized)",
+            run_start,
+            run_end,
+            if ascending { ">=" } else { "<=" },
+            threshold_remainder
+        );
+
+        if ascending {
+            // For ascending queries (>= threshold), scan left-to-right
+            // Early termination: once we find first remainder >= threshold, return true
+            // If remainder > threshold, all subsequent remainders will also be > threshold
+            for pos in run_start..=run_end {
+                let remainder = self.read_slot(pos);
+                println!("        Checking position {} with remainder {} (ascending)", pos, remainder);
+
+                if remainder >= threshold_remainder {
+                    println!(
+                        "      Found remainder {} >= threshold {} at position {}",
+                        remainder, threshold_remainder, pos
+                    );
+                    return true;
+                }
+            }
+        } else {
+            // For descending queries (<= threshold), scan right-to-left
+            // Early termination: once we find first remainder <= threshold, return true
+            // If remainder < threshold, all previous remainders will also be < threshold
+            let mut pos = run_end;
+            loop {
+                let remainder = self.read_slot(pos);
+                println!("        Checking position {} with remainder {} (descending)", pos, remainder);
+
+                if remainder <= threshold_remainder {
+                    println!(
+                        "      Found remainder {} <= threshold {} at position {}",
+                        remainder, threshold_remainder, pos
+                    );
+                    return true;
+                }
+
+                // Continue to previous position if we haven't reached the start
+                if pos == run_start {
+                    break;
+                }
+                pos -= 1;
+            }
+        }
+
+        println!(
+            "      No remainder found {} threshold {}",
+            if ascending { ">=" } else { "<=" },
+            threshold_remainder
+        );
+        false
+    }
+
+    /// Get the start and end positions of a quotient's run
+    fn get_run_bounds(&self, quotient: usize) -> Option<(usize, usize)> {
         // Get the rank of this quotient (how many quotients before it)
         let (occupieds_start, runends_start, _) = self.get_offsets();
         let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
@@ -611,46 +915,23 @@ impl InfixStore {
 
         let rank_result = rank(occupieds_slice, quotient);
 
-        println!("    rank({}) = {}", quotient, rank_result);
-
         // Use select to find the end position of this run
         let num_slots = SCALED_SIZES[self.size_grade as usize];
         let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
         let runends_slice = &self.data[runends_start..runends_start + runends_words];
 
-        let run_end_pos = match select(runends_slice, rank_result) {
-            Some(pos) => {
-                println!("    select({}) = {}", rank_result, pos);
-                pos
-            },
-            None => {
-                println!("    select({}) returned None", rank_result);
-                return false; // run not found
-            }
+        let run_end = match select(runends_slice, rank_result) {
+            Some(pos) => pos,
+            None => return None,
         };
 
-        // Scan backwards from run end to find the start of this run
-        let mut pos = run_end_pos;
-        println!("    Scanning run from pos {} backwards:", pos);
-        loop {
-            let remainder = self.read_slot(pos);
-            println!("      pos {}: remainder = {}", pos, remainder);
-            if remainder == target_remainder {
-                println!("    Found target remainder at pos {}", pos);
-                return true;
-            }
-
-            // Check if we've reached the beginning of this run
-            if pos == 0 || self.is_runend(pos - 1) {
-                println!("    Reached beginning of run at pos {}", pos);
-                break;
-            }
-
-            pos -= 1;
+        // Find the start of this run by looking backwards
+        let mut run_start = run_end;
+        while run_start > 0 && !self.is_runend(run_start - 1) {
+            run_start -= 1;
         }
 
-        println!("    Target remainder {} not found in run", target_remainder);
-        false
+        Some((run_start, run_end))
     }
 }
 
