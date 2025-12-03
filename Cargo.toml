@@ -8,3 +8,10 @@ dashmap = "6.1.0"
 rand = "0.8"
 rand_distr = "0.4"
 fastbloom = "0.14.0"
+
+[dev-dependencies]
+divan = "0.1"
+
+[[bench]]
+name = "query_benchmarks"
+harness = false
