@@ -3,6 +3,7 @@ use crate::bitmap::{clear_bit, get_bit, rank, select, set_bit};
 use std::fmt;
 
 const TARGET_SIZE: u16 = 1024;
+const QUOTIENT_SIZE: u8 = 10;
 // const LOAD_FACTOR: f64 = 0.95;
 const SIZE_GRADE_COUNT: usize = 31;
 // const DEFAULT_SIZE_GRADE: u8 = 14;
@@ -24,6 +25,7 @@ pub struct InfixStore {
     elem_count: u16,
     size_grade: u8, // decides the number of slots in the infix store
     remainder_size: u8,
+    quotient_size: u8,
     data: Vec<u64>,
 }
 
@@ -49,23 +51,27 @@ impl InfixStore {
 
         let total_words = popcounts_words + occupieds_words + runends_words + slots_words;
         let mut data = vec![0u64; total_words];
+        // let quotient_size = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS - 1;
+        // println!("quotient_size: {}", quotient_size);
 
         if infixes.is_empty() {
             return Self {
                 elem_count: 0,
                 size_grade,
                 remainder_size,
+                quotient_size: QUOTIENT_SIZE,
                 data,
             };
         }
 
         // step 3: load infixes in the infix store
-        Self::load_infixes_to_store(&mut data, infixes, remainder_size, num_slots);
+        Self::load_infixes_to_store(&mut data, infixes, QUOTIENT_SIZE, remainder_size, num_slots);
 
         Self {
             elem_count: infixes.len() as u16,
             size_grade,
             remainder_size,
+            quotient_size: QUOTIENT_SIZE,
             data,
         }
     }
@@ -84,6 +90,7 @@ impl InfixStore {
     fn load_infixes_to_store(
         data: &mut [u64],
         infixes: &[u64],
+        quotient_size: u8,
         remainder_size: u8,
         num_slots: u16,
     ) {
@@ -98,7 +105,7 @@ impl InfixStore {
         let mut prev_quotient = None;
 
         for infix in infixes {
-            let (quotient, remainder) = Self::split_infix(*infix, remainder_size);
+            let (quotient, remainder) = Self::split_infix(*infix, quotient_size, remainder_size);
 
             // set quotient bit in occupieds bitmap
             let occupieds_slice = &mut data[occupieds_start..occupieds_start + occupieds_words];
@@ -129,9 +136,11 @@ impl InfixStore {
     }
 
     /// Split infix into quotient and remainder
-    fn split_infix(infix: u64, remainder_size: u8) -> (u64, u64) {
-        let quotient = infix >> remainder_size;
+    fn split_infix(infix: u64, quotient_size: u8, remainder_size: u8) -> (u64, u64) {
+        // extract remainder (bottom remainder_size bits)
         let remainder = infix & ((1 << remainder_size) - 1);
+
+        let quotient = (infix >> remainder_size) & ((1 << (quotient_size)) - 1);
         (quotient, remainder)
     }
 
@@ -192,7 +201,7 @@ impl InfixStore {
             num_slots = SCALED_SIZES[self.size_grade as usize];
         }
 
-        let (quotient, remainder) = Self::split_infix(infix, self.remainder_size);
+        let (quotient, remainder) = Self::split_infix(infix, self.quotient_size, self.remainder_size);
         let (occupieds_start, runends_start, slots_start) = self.get_offsets();
         let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
         let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
@@ -269,7 +278,7 @@ impl InfixStore {
     /// delete a key from the infix store
     pub fn delete(&mut self, infix: u64) -> bool {
         // check if the quotient exists
-        let (quotient, remainder) = Self::split_infix(infix, self.remainder_size);
+        let (quotient, remainder) = Self::split_infix(infix, self.quotient_size, self.remainder_size);
         if !self.is_occupied(quotient as usize) {
             return false;
         }
@@ -559,8 +568,8 @@ impl InfixStore {
         let (shared_prefix_len, redundant_bits, quotient_bits) =
             Diva::get_shared_ignore_implicit_size(&predecessor_key, &successor_key, false);
 
-        println!("  Extraction params: shared={}, redundant={}, quotient={}",
-                 shared_prefix_len, redundant_bits, quotient_bits);
+        // println!("  Extraction params: shared={}, redundant={}, quotient={}",
+        //          shared_prefix_len, redundant_bits, quotient_bits);
 
         let infix = Diva::extract_partial_key(
             query_key,
@@ -573,21 +582,21 @@ impl InfixStore {
         println!("  Query key infix: {}", infix);
 
         // Step 2: Split infix into quotient and remainder
-        let (quotient, remainder) = Self::split_infix(infix, remainder_size);
+        let (quotient, remainder) = Self::split_infix(infix, quotient_bits, remainder_size);
 
         println!("  Quotient: {}, Remainder: {}", quotient, remainder);
 
         // Step 3: Check if quotient exists in occupieds bitmap
         if !self.is_occupied(quotient as usize) {
-            println!("  Quotient {} not occupied", quotient);
+            // println!("  Quotient {} not occupied", quotient);
             return false;
         }
 
-        println!("  Quotient {} is occupied, searching run...", quotient);
+        // println!("  Quotient {} is occupied, searching run...", quotient);
 
         // Step 4: Find the run for this quotient and scan for exact remainder match
         let result = self.find_remainder_in_run(quotient as usize, remainder);
-        println!("  Run search result: {}", result);
+        // println!("  Run search result: {}", result);
         result
     }
 
@@ -733,14 +742,14 @@ mod tests {
         // infix = 0b1010101010101010 (16 bits)
         // remainder_size = 8
         let infix = 0b1010101010101010u64;
-        let (quotient, remainder) = InfixStore::split_infix(infix, 8);
+        let (quotient, remainder) = InfixStore::split_infix(infix, 10, 8);
 
         assert_eq!(quotient, 0b10101010); // top 8 bits
         assert_eq!(remainder, 0b10101010); // bottom 8 bits
 
         // test with different sizes
         let infix = 0b11110000_11001100u64;
-        let (quotient, remainder) = InfixStore::split_infix(infix, 8);
+        let (quotient, remainder) = InfixStore::split_infix(infix, 10, 8);
         assert_eq!(quotient, 0b11110000);
         assert_eq!(remainder, 0b11001100);
     }

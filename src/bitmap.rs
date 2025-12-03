@@ -2,6 +2,10 @@ const U64_BIT_SIZE: usize = 64;
 
 #[inline]
 pub fn set_bit(data: &mut [u64], pos: usize) {
+    if pos >= data.len() * U64_BIT_SIZE {
+        println!("pos: {} is out of bounds", pos);
+        println!("data.len(): {}", data.len());
+    }
     data[pos / U64_BIT_SIZE] |= 1 << (pos % U64_BIT_SIZE);
 }
 

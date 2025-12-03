@@ -84,8 +84,8 @@ impl Diva {
 
             // extract infixes from intermediate keys
             let mut infixes = Vec::new();
-            println!("Processing keys between {} and {} (shared={}, redundant={}, quotient={})",
-                     predecessor, successor, shared_prefix_len, redundant_bits, quotient_bits);
+            // println!("Processing keys between {} and {} (shared={}, redundant={}, quotient={})",
+            //          predecessor, successor, shared_prefix_len, redundant_bits, quotient_bits);
             for key in intermediate_keys {
                 let infix = Self::extract_partial_key(
                     key,
@@ -94,11 +94,11 @@ impl Diva {
                     quotient_bits,
                     remainder_size,
                 );
-                println!("Key {} ({:064b}) -> infix {} ({:064b})",
-                         key, key, infix, infix);
+                // println!("Key {} ({:064b}) -> infix {} ({:064b})",
+                //          key, key, infix, infix);
                 infixes.push(infix);
             }
-            println!("Infixes before InfixStore creation: {:?}", infixes);
+            // println!("Infixes before InfixStore creation: {:?}", infixes);
 
             // create InfixStore and attach to predecessor sample
             if !infixes.is_empty() {
@@ -271,7 +271,7 @@ impl Diva {
         };
 
         // step 3: compute quotient size or aka implicit bits
-        let bits_used = shared + 1 + redundant_bits; // shared + first_diff + redundant
+        let bits_used = shared + redundant_bits;
 
         if bits_used >= 64 {
             return (shared, redundant_bits, 0);
@@ -303,6 +303,7 @@ impl Diva {
 
     /// extract partial key (infix) from a full key
     /// returns: infix = quotient_bits | remainder_bits
+
     /// # Arguments
     /// * `key` - The full key to extract from
     /// * `shared_prefix_len` - Number of shared prefix bits to skip
@@ -323,7 +324,7 @@ impl Diva {
         }
 
         let remaining_bits = 64 - start_bit;
-        let bits_to_extract = (1 + quotient_bits + remainder_bits).min(remaining_bits);
+        let bits_to_extract = (quotient_bits + remainder_bits).min(remaining_bits);
 
         if bits_to_extract == 0 {
             return 0;
@@ -529,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    // #[ignore]
     fn test_point_query() {
         // Create dataset with keys that will create multiple InfixStores
         let keys: Vec<Key> = (0..3000).map(|i| i * 100).collect();
