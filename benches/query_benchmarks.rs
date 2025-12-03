@@ -11,7 +11,8 @@ fn main() {
     divan::main();
 }
 
-const SIZES: &[usize] = &[10_000, 100_000, 1_000_000, 10_000_000];
+// const SIZES: &[usize] = &[10_000, 100_000, 1_000_000, 10_000_000];
+const SIZES: &[usize] = &[10_000, 100_000, 1_000_000];
 
 // generate query ranges for benchmarking
 fn generate_query_ranges(keys: &[Key], percent: f64, num_queries: usize) -> Vec<(Key, Key)> {
@@ -128,7 +129,6 @@ fn bloom_construction(bencher: Bencher, size: usize) {
     bencher.bench_local(|| {
         black_box(BloomFilter::new_with_keys(
             black_box(&keys),
-            black_box(1024),
             black_box(0.01),
         ))
     });
@@ -137,7 +137,7 @@ fn bloom_construction(bencher: Bencher, size: usize) {
 #[divan::bench(args = SIZES)]
 fn bloom_point_query(bencher: Bencher, size: usize) {
     let keys = generate_smooth_u64(Some(size));
-    let bloom = BloomFilter::new_with_keys(&keys, 1024, 0.01);
+    let bloom = BloomFilter::new_with_keys(&keys, 0.01);
 
     let mut rng = rand::thread_rng();
     let query_keys: Vec<Key> = (0..1000)
@@ -155,14 +155,14 @@ fn bloom_point_query(bencher: Bencher, size: usize) {
     bencher.bench_local(|| {
         let key = query_keys[query_idx % query_keys.len()];
         query_idx += 1;
-        black_box(bloom.contains(black_box(key)))
+        black_box(bloom.point_query(black_box(key)))
     });
 }
 
 #[divan::bench(args = SIZES)]
 fn bloom_range_query_small(bencher: Bencher, size: usize) {
     let keys = generate_smooth_u64(Some(size));
-    let bloom = BloomFilter::new_with_keys(&keys, 1024, 0.01);
+    let bloom = BloomFilter::new_with_keys(&keys, 0.01);
     let query_ranges = generate_query_ranges(&keys, 0.01, 1000);
 
     let mut query_idx = 0;
@@ -176,7 +176,7 @@ fn bloom_range_query_small(bencher: Bencher, size: usize) {
 #[divan::bench(args = SIZES)]
 fn bloom_range_query_medium(bencher: Bencher, size: usize) {
     let keys = generate_smooth_u64(Some(size));
-    let bloom = BloomFilter::new_with_keys(&keys, 1024, 0.01);
+    let bloom = BloomFilter::new_with_keys(&keys, 0.01);
     let query_ranges = generate_query_ranges(&keys, 0.07, 1000);
 
     let mut query_idx = 0;
@@ -190,7 +190,7 @@ fn bloom_range_query_medium(bencher: Bencher, size: usize) {
 #[divan::bench(args = SIZES)]
 fn bloom_range_query_large(bencher: Bencher, size: usize) {
     let keys = generate_smooth_u64(Some(size));
-    let bloom = BloomFilter::new_with_keys(&keys, 1024, 0.01);
+    let bloom = BloomFilter::new_with_keys(&keys, 0.01);
     let query_ranges = generate_query_ranges(&keys, 0.4, 1000);
 
     let mut query_idx = 0;

@@ -580,12 +580,12 @@ mod tests {
         let target_size = 1024; // This will create samples at 100, 400, 700
         let diva = Diva::new_with_keys(&keys, target_size, 0.01);
 
-        println!("Created Diva with {} keys", keys.len());
-        diva.pretty_print();
+        // println!("Created Diva with {} keys", keys.len());
+        // diva.pretty_print();
 
         // Test that all original keys are found
         for &key in &keys {
-            println!("Testing key: {}", key);
+            // println!("Testing key: {}", key);
             let found = diva.contains(key);
             assert!(found, "Key {} should be found", key);
         }
@@ -634,8 +634,8 @@ mod tests {
         let target_size = 1024; // This will create one sample with all keys in InfixStore
         let diva = Diva::new_with_keys(&keys, target_size, 0.01);
 
-        println!("Testing range query on simple dataset");
-        diva.pretty_print();
+        // println!("Testing range query on simple dataset");
+        // diva.pretty_print();
 
         // Test range that includes all keys
         let result = diva.range_query(50, 750);
@@ -665,8 +665,8 @@ mod tests {
         let target_size = 2; // Force multiple samples and InfixStores
         let diva = Diva::new_with_keys(&keys, target_size, 0.01);
 
-        println!("Testing range query within single InfixStore");
-        diva.pretty_print();
+        // println!("Testing range query within single InfixStore");
+        // diva.pretty_print();
 
         // Test range that spans within one InfixStore
         let result = diva.range_query(180, 280);
@@ -688,8 +688,8 @@ mod tests {
         let target_size = 2; // Force multiple samples and InfixStores
         let diva = Diva::new_with_keys(&keys, target_size, 0.01);
 
-        println!("Testing range query across multiple InfixStores");
-        diva.pretty_print();
+        // println!("Testing range query across multiple InfixStores");
+        // diva.pretty_print();
 
         // Test range spanning multiple InfixStores
         let result = diva.range_query(250, 750);
@@ -711,8 +711,8 @@ mod tests {
         let target_size = 2; // This will create samples
         let diva = Diva::new_with_keys(&keys, target_size, 0.01);
 
-        println!("Testing range query with samples");
-        diva.pretty_print();
+        // println!("Testing range query with samples");
+        // diva.pretty_print();
 
         // Test range that includes samples
         let result = diva.range_query(50, 350);

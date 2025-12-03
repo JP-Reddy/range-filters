@@ -679,7 +679,7 @@ impl InfixStore {
     ) -> bool {
         // Check if quotient exists
         if !self.is_occupied(quotient) {
-            println!("    Quotient {} not occupied", quotient);
+            // println!("    Quotient {} not occupied", quotient);
             return false;
         }
 

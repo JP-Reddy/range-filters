@@ -216,7 +216,7 @@ impl XFastTrie {
         // step 1: find the longest prefix length
         let longest_prefix_length = self.find_longest_prefix_length(key);
 
-        println!("longest_prefix_length: {}", longest_prefix_length);
+        // println!("longest_prefix_length: {}", longest_prefix_length);
 
         let predecessor = self.predecessor(key);
         let successor = self.successor(key);
