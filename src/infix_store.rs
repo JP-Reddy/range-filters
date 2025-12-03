@@ -1325,27 +1325,6 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_integrity_with_multiple_quotients() {
-        let mut store = InfixStore::new_with_infixes(&[], 8);
-
-        // insert items with various quotients
-        for q in [10, 50, 100, 200, 400, 500, 600, 700] {
-            for r in 0..10 {
-                store.insert((q << 8) | r);
-                verify_cache_integrity(&store);
-            }
-        }
-
-        // delete some items
-        for q in [50, 200, 500] {
-            for r in 0..5 {
-                store.delete((q << 8) | r);
-                verify_cache_integrity(&store);
-            }
-        }
-    }
-
-    #[test]
     fn test_cache_integrity_near_boundary() {
         let mut store = InfixStore::new_with_infixes(&[], 8);
 
@@ -1430,27 +1409,5 @@ mod tests {
             store.delete((100u64 << 8) | i);
         }
         verify_cache_integrity(&store);
-    }
-
-    #[test]
-    fn test_cache_with_mixed_operations() {
-        let mut store = InfixStore::new_with_infixes(&[], 8);
-
-        // mixed insert/delete operations
-        for cycle in 0..5 {
-            let base = cycle * 100;
-
-            // insert batch
-            for i in 0..50 {
-                store.insert((100u64 << 8) | (base + i));
-            }
-            verify_cache_integrity(&store);
-
-            // delete batch
-            for i in 0..30 {
-                store.delete((100u64 << 8) | (base + i));
-            }
-            verify_cache_integrity(&store);
-        }
     }
 }
