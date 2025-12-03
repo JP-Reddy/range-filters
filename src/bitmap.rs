@@ -111,6 +111,70 @@ pub fn select_cached(
     }
 }
 
+/// Check if there are any set bits in the range [start_pos, end_pos) (exclusive end)
+/// Optimized for range queries using bit manipulation
+#[inline]
+pub fn has_bits_in_range(data: &[u64], start_pos: usize, end_pos: usize) -> bool {
+    if start_pos >= end_pos {
+        return false;
+    }
+
+    let start_word = start_pos / U64_BIT_SIZE;
+    let end_word = (end_pos - 1) / U64_BIT_SIZE;
+
+    if start_word == end_word {
+        // Range within single word
+        let start_bit = start_pos % U64_BIT_SIZE;
+        let end_bit = end_pos % U64_BIT_SIZE;
+
+        // Create mask for bits [start_bit, end_bit)
+        let mask = if end_bit == 0 {
+            // Special case: end_bit wraps to 0, means we want all bits from start_bit to 63
+            !((1u64 << start_bit) - 1)
+        } else {
+            ((1u64 << end_bit) - 1) & !((1u64 << start_bit) - 1)
+        };
+
+        if start_word < data.len() {
+            return (data[start_word] & mask) != 0;
+        }
+        return false;
+    }
+
+    // Range spans multiple words
+
+    // Check start word (partial)
+    if start_word < data.len() {
+        let start_bit = start_pos % U64_BIT_SIZE;
+        let start_mask = !((1u64 << start_bit) - 1); // All bits from start_bit to 63
+        if (data[start_word] & start_mask) != 0 {
+            return true;
+        }
+    }
+
+    // Check complete intermediate words
+    for word_idx in (start_word + 1)..end_word.min(data.len()) {
+        if data[word_idx] != 0 {
+            return true;
+        }
+    }
+
+    // Check end word (partial)
+    if end_word < data.len() {
+        let end_bit = end_pos % U64_BIT_SIZE;
+        let end_mask = if end_bit == 0 {
+            u64::MAX // All bits if end_bit wraps to 0
+        } else {
+            (1u64 << end_bit) - 1 // Bits 0 to end_bit-1
+        };
+        if (data[end_word] & end_mask) != 0 {
+            return true;
+        }
+    }
+
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,5 +268,61 @@ mod tests {
             assert_eq!(select(&data, rank_), Some(expected_pos));
             assert_eq!(rank(&data, expected_pos + 1), rank_ + 1usize);
         }
+    }
+
+    #[test]
+    fn test_has_bits_in_range() {
+        let mut data = vec![0u64; 2];
+
+        // Set bits: 5, 10, 67, 100
+        set_bit(&mut data, 5);
+        set_bit(&mut data, 10);
+        set_bit(&mut data, 67);
+        set_bit(&mut data, 100);
+
+        // Test ranges that should find bits
+        assert!(has_bits_in_range(&data, 0, 15)); // Should find bit 5 and 10
+        assert!(has_bits_in_range(&data, 5, 6)); // Should find bit 5
+        assert!(has_bits_in_range(&data, 65, 70)); // Should find bit 67
+        assert!(has_bits_in_range(&data, 90, 110)); // Should find bit 100
+
+        // Test ranges that should not find bits
+        assert!(!has_bits_in_range(&data, 0, 5)); // Before bit 5
+        assert!(!has_bits_in_range(&data, 11, 67)); // Between bits 10 and 67
+        assert!(!has_bits_in_range(&data, 101, 120)); // After bit 100
+
+        // Test edge cases
+        assert!(!has_bits_in_range(&data, 10, 10)); // Empty range
+        assert!(!has_bits_in_range(&data, 15, 10)); // Invalid range
+        assert!(has_bits_in_range(&data, 10, 11)); // Single bit range
+    }
+
+    #[test]
+    fn test_has_bits_in_range_single_word() {
+        let mut data = vec![0b10101u64]; // Bits 0, 2, 4 set
+
+        assert!(has_bits_in_range(&data, 0, 3)); // Should find bit 0 and 2
+        assert!(has_bits_in_range(&data, 2, 5)); // Should find bit 2 and 4
+        assert!(!has_bits_in_range(&data, 1, 2)); // Between bits 0 and 2
+        assert!(!has_bits_in_range(&data, 5, 10)); // After all bits
+    }
+
+    #[test]
+    fn test_has_bits_in_range_multiple_words() {
+        let mut data = vec![0u64; 3];
+
+        // Set bits in different words
+        set_bit(&mut data, 10); // First word
+        set_bit(&mut data, 70); // Second word
+        set_bit(&mut data, 130); // Third word
+
+        // Test ranges spanning multiple words
+        assert!(has_bits_in_range(&data, 0, 80)); // Should find bits 10, 70
+        assert!(has_bits_in_range(&data, 65, 135)); // Should find bits 70, 130
+        assert!(has_bits_in_range(&data, 5, 140)); // Should find all bits
+
+        // Test ranges in gaps between words
+        assert!(!has_bits_in_range(&data, 15, 65)); // Between bits 10 and 70
+        assert!(!has_bits_in_range(&data, 75, 125)); // Between bits 70 and 130
     }
 }

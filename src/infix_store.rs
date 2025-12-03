@@ -750,10 +750,18 @@ impl InfixStore {
         );
 
         // Step 1: Check for any occupied quotients strictly between start_quotient and end_quotient
-        for quotient in (start_quotient + 1)..end_quotient {
-            if self.is_occupied(quotient) {
-                println!("    Found occupied quotient {} between endpoints", quotient);
-                return true; // All remainders in this quotient are within range
+        // Use bit manipulation optimization to avoid iterating through each quotient
+        if start_quotient + 1 < end_quotient {
+            let (occupieds_start, _, _) = self.get_offsets();
+            let occupieds_words = (TARGET_SIZE as usize + crate::U64_BITS - 1) / crate::U64_BITS;
+            let occupieds_slice = &self.data[occupieds_start..occupieds_start + occupieds_words];
+
+            if crate::has_bits_in_range(occupieds_slice, start_quotient + 1, end_quotient) {
+                println!(
+                    "    Found occupied quotient(s) between {} and {} (bit manipulation)",
+                    start_quotient + 1, end_quotient - 1
+                );
+                return true; // All remainders in intermediate quotients are within range
             }
         }
 
