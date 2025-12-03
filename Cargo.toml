@@ -9,6 +9,15 @@ repository = "https://github.com/JP-Reddy/range-filters"
 readme = "README.md"
 keywords = ["range-filter", "data-structures", "bloom-filter", "database", "diva"]
 categories = ["data-structures", "algorithms"]
+  exclude = [
+      "*.md",
+      "!README.md",
+      "diva_range_filter.pdf",
+      "examples/tmp.rs",
+      "results/",
+      ".vscode/",
+      ".idea/",
+  ]
 
 [dependencies]
 dashmap = "6.1.0"
