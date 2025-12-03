@@ -152,7 +152,7 @@ impl Diva {
             shared_bits,
             redundant_bits,
             quotient_bits,
-            self.remainder_size
+            self.remainder_size,
         );
 
         match self.y_fast_trie.get_infix_store(s_low) {
@@ -204,7 +204,7 @@ impl Diva {
             shared_bits,
             redundant_bits,
             quotient_bits,
-            self.remainder_size
+            self.remainder_size,
         );
 
         // delete from store if the store exists
@@ -361,33 +361,99 @@ impl Diva {
         print!("{}", self);
     }
 
+    /// Helper function to access InfixStore for a given key with proper error handling
+    /// Returns the result of the closure if all required components are found
+    fn with_infix_store_for_key<F, R>(&self, key: Key, f: F) -> Option<R>
+    where
+        F: FnOnce(&InfixStore, Key, Key) -> R,
+    {
+        let predecessor_infix_store = self.y_fast_trie.predecessor_infix_store(key)?;
+        let predecessor_key = self.y_fast_trie.predecessor(key)?;
+        let successor_key = self.y_fast_trie.successor(key)?;
+
+        let store = predecessor_infix_store.read().ok()?;
+        Some(f(&*store, predecessor_key, successor_key))
+    }
+
+    /// Check if any sample exists in the given range [start, end]
+    fn has_samples_in_range(&self, start: Key, end: Key) -> bool {
+        if let Some(first_sample) = self.y_fast_trie.successor(start) {
+            first_sample <= end
+        } else {
+            false
+        }
+    }
+
     /// Point lookup: check if a key exists in the filter
     /// Returns true if key might exist (with FPR), false if definitely doesn't exist
     pub fn contains(&self, key: Key) -> bool {
-        // Step 1: Check Y-Fast Trie directly (samples)
         if self.y_fast_trie.contains(key) {
             return true;
         }
 
-        // Step 2: Find predecessor sample to locate the appropriate InfixStore
-        if let Some(predecessor_infix_store) = self.y_fast_trie.predecessor_infix_store(key) {
-            // Step 3: Find predecessor and successor samples to get infix conversion params
-            if let Some(predecessor_key) = self.y_fast_trie.predecessor(key) {
-                if let Some(successor_key) = self.y_fast_trie.successor(key) {
-                    println!("Querying key {}, pred: {}, succ: {}", key, predecessor_key, successor_key);
-                    // Step 4: Query the InfixStore
-                    if let Ok(store) = predecessor_infix_store.read() {
-                        let result = store.point_query(key, predecessor_key, successor_key, self.remainder_size);
-                        println!("InfixStore query result for key {}: {}", key, result);
-                        return result;
+        // Query InfixStore using helper function
+        self.with_infix_store_for_key(key, |store, predecessor_key, successor_key| {
+            let result =
+                store.point_query(key, predecessor_key, successor_key, self.remainder_size);
+            result
+        })
+        .unwrap_or_else(|| {
+            false
+        })
+    }
+
+    /// Range query: check if any key exists in the given range [start, end] (inclusive)
+    /// Returns true if at least one key might exist in the range (with FPR), false if definitely no keys exist
+    pub fn range_query(&self, start: Key, end: Key) -> bool {
+        if start > end {
+            return false;
+        }
+
+        // Check if any samples intersect with the range
+        if self.has_samples_in_range(start, end) {
+            return true;
+        }
+
+        // Check all InfixStores
+        let mut check_key = start;
+        while check_key <= end {
+            if let Some(result) =
+                self.with_infix_store_for_key(check_key, |store, predecessor_key, successor_key| {
+                    // Determine the range to query in this InfixStore
+                    let range_start = start.max(predecessor_key + 1);
+                    let range_end = end.min(successor_key - 1);
+
+                    if range_start <= range_end {
+                        if store.range_query(
+                            range_start,
+                            range_end,
+                            predecessor_key,
+                            successor_key,
+                            self.remainder_size,
+                        ) {
+                            return (true, successor_key); // Found match, continue from successor
+                        }
                     }
+
+                    (false, successor_key) // No match, but continue from successor
+                })
+            {
+                let (found, successor_key) = result;
+                if found {
+                    return true;
                 }
+                check_key = successor_key;
+            } else {
+                break; // No InfixStore found
             }
         }
 
-        println!("No predecessor InfixStore found for key {}", key);
-
         false
+    }
+
+    /// Get the number of samples in the Y-Fast Trie
+    pub fn sample_count(&self) -> usize {
+        self.y_fast_trie.sample_count()
     }
 }
 
@@ -530,7 +596,6 @@ mod tests {
     }
 
     #[test]
-    // #[ignore]
     fn test_point_query() {
         // Create dataset with keys that will create multiple InfixStores
         let keys: Vec<Key> = (0..3000).map(|i| i * 100).collect();
@@ -560,6 +625,157 @@ mod tests {
         for &key in &keys {
             assert!(diva.contains(key), "Key {} should be found", key);
         }
+    }
+
+    #[test]
+    fn test_range_query_simple() {
+        // Simple test case with small numbers
+        let keys: Vec<Key> = vec![100, 200, 300, 400, 500, 600, 700];
+        let target_size = 1024; // This will create one sample with all keys in InfixStore
+        let diva = Diva::new_with_keys(&keys, target_size, 0.01);
+
+        println!("Testing range query on simple dataset");
+        diva.pretty_print();
+
+        // Test range that includes all keys
+        let result = diva.range_query(50, 750);
+        assert!(result, "Range [50, 750] should include all keys");
+
+        // Test range with no keys
+        let result = diva.range_query(10, 50);
+        assert!(!result, "Range [10, 50] should include no keys");
+
+        // Test range just below and above existing keys
+        let result = diva.range_query(99, 101);
+        assert!(result, "Range [99, 101] should include key 100");
+
+        let result = diva.range_query(699, 701);
+        assert!(result, "Range [699, 701] should include key 700");
+
+        // Test range that should include existing keys - check specific keys
+        // Since we have keys at 200, 300, 400, 500, 600, check if any exist in that range
+        let result = diva.range_query(200, 600);
+        assert!(result, "Range [200, 600] should include existing keys");
+    }
+
+    #[test]
+    fn test_range_query_single_infix_store() {
+        // Test range query within a single InfixStore
+        let keys: Vec<Key> = vec![100, 150, 200, 250, 300, 350, 400];
+        let target_size = 2; // Force multiple samples and InfixStores
+        let diva = Diva::new_with_keys(&keys, target_size, 0.01);
+
+        println!("Testing range query within single InfixStore");
+        diva.pretty_print();
+
+        // Test range that spans within one InfixStore
+        let result = diva.range_query(180, 280);
+        assert!(result, "Range [180, 280] should include keys 200, 250");
+
+        // Test range at boundaries
+        let result = diva.range_query(200, 250);
+        assert!(result, "Range [200, 250] should include keys 200, 250");
+
+        // Test range with no matching keys
+        let result = diva.range_query(125, 149);
+        assert!(!result, "Range [125, 149] should include no keys");
+    }
+
+    #[test]
+    fn test_range_query_multiple_infix_stores() {
+        // Test range query spanning multiple InfixStores
+        let keys: Vec<Key> = vec![100, 200, 300, 400, 500, 600, 700, 800, 900, 1000];
+        let target_size = 2; // Force multiple samples and InfixStores
+        let diva = Diva::new_with_keys(&keys, target_size, 0.01);
+
+        println!("Testing range query across multiple InfixStores");
+        diva.pretty_print();
+
+        // Test range spanning multiple InfixStores
+        let result = diva.range_query(250, 750);
+        assert!(result, "Range [250, 750] should span multiple InfixStores");
+
+        // Test range that starts before first key and ends after last
+        let result = diva.range_query(50, 1050);
+        assert!(result, "Range [50, 1050] should include all keys");
+
+        // Test range spanning partial InfixStores
+        let result = diva.range_query(150, 850);
+        assert!(result, "Range [150, 850] should span partial InfixStores");
+    }
+
+    #[test]
+    fn test_range_query_with_samples() {
+        // Test range queries that include sampled keys
+        let keys: Vec<Key> = vec![100, 200, 300, 400, 500];
+        let target_size = 2; // This will create samples
+        let diva = Diva::new_with_keys(&keys, target_size, 0.01);
+
+        println!("Testing range query with samples");
+        diva.pretty_print();
+
+        // Test range that includes samples
+        let result = diva.range_query(50, 350);
+        assert!(
+            result,
+            "Range [50, 350] should include samples and InfixStore keys"
+        );
+
+        // Test range exactly on sample boundaries
+        let result = diva.range_query(100, 300);
+        assert!(result, "Range [100, 300] should include sample keys");
+
+        // Test range starting from sample
+        let result = diva.range_query(300, 450);
+        assert!(result, "Range [300, 450] should start from sample");
+    }
+
+    #[test]
+    fn test_range_query_edge_cases() {
+        let keys: Vec<Key> = vec![100, 200, 300, 400, 500];
+        let target_size = 1024; // Single InfixStore
+        let diva = Diva::new_with_keys(&keys, target_size, 0.01);
+
+        // Test range with start > end (should return false)
+        let result = diva.range_query(400, 200);
+        assert!(!result, "Invalid range [400, 200] should return false");
+
+        // Test range at exact key boundaries
+        let result = diva.range_query(200, 200);
+        assert!(result, "Range [200, 200] should include key 200");
+
+        // Test range just missing all keys
+        let result = diva.range_query(50, 99);
+        assert!(!result, "Range [50, 99] should miss all keys");
+
+        let result = diva.range_query(501, 600);
+        assert!(!result, "Range [501, 600] should miss all keys");
+
+        // Test range at boundaries
+        let result = diva.range_query(100, 500);
+        assert!(result, "Range [100, 500] should include all keys");
+    }
+
+    #[test]
+    fn test_range_query_large_dataset() {
+        // Test with larger dataset to ensure performance
+        let keys: Vec<Key> = (0..1000).map(|i| i * 10).collect();
+        let target_size = 100; // Create multiple InfixStores
+        let diva = Diva::new_with_keys(&keys, target_size, 0.01);
+
+        // Test various range sizes
+        let result = diva.range_query(500, 1500);
+        assert!(result, "Range [500, 1500] should include many keys");
+
+        let result = diva.range_query(2500, 5000);
+        assert!(result, "Range [2500, 5000] should include many keys");
+
+        let result = diva.range_query(8000, 9999);
+        assert!(result, "Range [8000, 9999] should include keys near end");
+
+        // Test range with no keys
+        let result = diva.range_query(15000, 20000);
+        assert!(!result, "Range [15000, 20000] should include no keys");
     }
 
     #[test]
