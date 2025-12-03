@@ -550,7 +550,7 @@ impl InfixStore {
         print!("{}", self);
     }
 
-    /// Helper function to convert a key to infix using consistent extraction logic
+    /// Function to convert a key to infix using consistent extraction logic
     /// Returns the infix value for the given key within the predecessor/successor range
     fn convert_key_to_infix(
         &self,
@@ -574,7 +574,6 @@ impl InfixStore {
     }
 
     /// Point query: check if a key exists in this InfixStore
-    /// Uses the same helper methods as Diva construction to ensure consistency
     ///
     /// # Arguments
     /// * `query_key` - The key to search for
@@ -588,63 +587,37 @@ impl InfixStore {
         successor_key: u64,
         remainder_size: u8,
     ) -> bool {
-        println!(
-            "InfixStore::point_query for key {}, pred {}, succ {}",
-            query_key, predecessor_key, successor_key
-        );
-
-        // Step 1: Convert query key to infix using helper function
         let infix =
             self.convert_key_to_infix(query_key, predecessor_key, successor_key, remainder_size);
 
-        println!("  Query key infix: {}", infix);
-
-        // Step 2: Split infix into quotient and remainder
         let (quotient, remainder) = Self::split_infix(infix, self.quotient_size, self.remainder_size);
 
-        println!("  Quotient: {}, Remainder: {}", quotient, remainder);
-
-        // Step 3: Check if quotient exists in occupieds bitmap
+        // Check if quotient exists in occupieds bitmap
         if !self.is_occupied(quotient as usize) {
-            // println!("  Quotient {} not occupied", quotient);
             return false;
         }
 
-        // println!("  Quotient {} is occupied, searching run...", quotient);
-
-        // Step 4: Find the run for this quotient and scan for exact remainder match
+        // Find the run for this quotient and scan for exact remainder match
         let result = self.find_remainder_in_run(quotient as usize, remainder);
-        // println!("  Run search result: {}", result);
         result
     }
 
     /// Find a specific remainder value within a quotient's run
     fn find_remainder_in_run(&self, quotient: usize, target_remainder: u64) -> bool {
-        println!(
-            "    find_remainder_in_run: quotient={}, target_remainder={}",
-            quotient, target_remainder
-        );
-
         let (run_start, run_end) = match self.get_run_bounds(quotient) {
             Some(bounds) => bounds,
             None => {
-                println!("    No run found for quotient {}", quotient);
                 return false;
             }
         };
 
-        println!("    Scanning run positions {} to {}", run_start, run_end);
-
         for pos in run_start..=run_end {
             let remainder = self.read_slot(pos);
-            println!("      pos {}: remainder = {}", pos, remainder);
             if remainder == target_remainder {
-                println!("    Found target remainder at pos {}", pos);
                 return true;
             }
         }
 
-        println!("    Target remainder {} not found in run", target_remainder);
         false
     }
 
@@ -668,34 +641,17 @@ impl InfixStore {
             return false;
         }
 
-        println!(
-            "InfixStore::range_query for range [{}, {}], pred {}, succ {}",
-            start_key, end_key, predecessor_key, successor_key
-        );
-
-        // Step 1: Convert both endpoints to infixes using helper function
+        // Convert both endpoints to infixes
         let start_infix =
             self.convert_key_to_infix(start_key, predecessor_key, successor_key, remainder_size);
         let end_infix =
             self.convert_key_to_infix(end_key, predecessor_key, successor_key, remainder_size);
 
-        println!("  Start: key {} -> infix {}", start_key, start_infix);
-        println!("  End: key {} -> infix {}", end_key, end_infix);
-
-        // Step 2: Split infixes into quotients and remainders
+        // Split infixes into quotients and remainders
         let (start_quotient, start_remainder) = Self::split_infix(start_infix, self.quotient_size, remainder_size);
         let (end_quotient, end_remainder) = Self::split_infix(end_infix, self.quotient_size, remainder_size);
 
-        println!(
-            "  Start: quotient={}, remainder={}",
-            start_quotient, start_remainder
-        );
-        println!(
-            "  End: quotient={}, remainder={}",
-            end_quotient, end_remainder
-        );
-
-        // Step 3: Handle the two main cases
+        // Handle the two main cases
         if start_quotient == end_quotient {
             // Case 1: Range spans single quotient
             self.query_single_quotient_range(
@@ -721,11 +677,6 @@ impl InfixStore {
         start_remainder: u64,
         end_remainder: u64,
     ) -> bool {
-        println!(
-            "    Single quotient {} range: remainder [{}, {}]",
-            quotient, start_remainder, end_remainder
-        );
-
         // Check if quotient exists
         if !self.is_occupied(quotient) {
             println!("    Quotient {} not occupied", quotient);
@@ -744,55 +695,35 @@ impl InfixStore {
         end_quotient: usize,
         end_remainder: u64,
     ) -> bool {
-        println!(
-            "    Multiple quotients: {} to {}",
-            start_quotient, end_quotient
-        );
-
-        // Step 1: Check for any occupied quotients strictly between start_quotient and end_quotient
-        // Use bit manipulation optimization to avoid iterating through each quotient
+        // Check for any occupied quotients strictly between start_quotient and end_quotient
         if start_quotient + 1 < end_quotient {
             let (occupieds_start, _, _) = self.get_offsets();
             let occupieds_words = (TARGET_SIZE as usize + crate::U64_BITS - 1) / crate::U64_BITS;
             let occupieds_slice = &self.data[occupieds_start..occupieds_start + occupieds_words];
 
             if crate::has_bits_in_range(occupieds_slice, start_quotient + 1, end_quotient) {
-                println!(
-                    "    Found occupied quotient(s) between {} and {} (bit manipulation)",
-                    start_quotient + 1, end_quotient - 1
-                );
                 return true; // All remainders in intermediate quotients are within range
             }
         }
 
-        // Step 2: Check start quotient for remainders >= start_remainder
+        // Check start quotient for remainders >= start_remainder
         if self.is_occupied(start_quotient) {
             if self.scan_run_from_remainder(start_quotient, start_remainder, true) {
-                println!(
-                    "    Found remainder >= {} in start quotient {}",
-                    start_remainder, start_quotient
-                );
                 return true;
             }
         }
 
-        // Step 3: Check end quotient for remainders <= end_remainder
+        // Check end quotient for remainders <= end_remainder
         if self.is_occupied(end_quotient) {
             if self.scan_run_from_remainder(end_quotient, end_remainder, false) {
-                println!(
-                    "    Found remainder <= {} in end quotient {}",
-                    end_remainder, end_quotient
-                );
                 return true;
             }
         }
 
-        println!("    No remainders found in range");
         false
     }
 
     /// Scan a quotient's run for any remainder in the range [start_remainder, end_remainder]
-    /// Uses paper's right-to-left scanning optimization with early termination
     fn scan_run_for_range(
         &self,
         quotient: usize,
@@ -804,32 +735,16 @@ impl InfixStore {
             None => return false,
         };
 
-        println!(
-            "      Scanning run positions {} to {} for remainder range [{}, {}] (right-to-left optimization)",
-            run_start, run_end, start_remainder, end_remainder
-        );
-
-        // Paper's optimization: scan right-to-left (backward) from run end
-        // This leverages the fact that remainders are sorted within runs
         let mut pos = run_end;
         loop {
             let remainder = self.read_slot(pos);
 
-            println!("        Checking position {} with remainder {}", pos, remainder);
-
             // Check if remainder is in our target range
             if remainder >= start_remainder && remainder <= end_remainder {
-                println!("      Found remainder {} in range at position {}", remainder, pos);
                 return true;
             }
 
-            // Early termination optimization: if remainder < start_remainder,
-            // all previous remainders will also be smaller (due to sorted order)
             if remainder < start_remainder {
-                println!(
-                    "      Early termination: remainder {} < start_remainder {}, stopping scan",
-                    remainder, start_remainder
-                );
                 return false;
             }
 
@@ -840,7 +755,6 @@ impl InfixStore {
             pos -= 1;
         }
 
-        println!("      No remainder found in range [{}, {}]", start_remainder, end_remainder);
         false
     }
 
@@ -857,44 +771,22 @@ impl InfixStore {
             None => return false,
         };
 
-        println!(
-            "      Scanning run positions {} to {} for remainder {} {} threshold (optimized)",
-            run_start,
-            run_end,
-            if ascending { ">=" } else { "<=" },
-            threshold_remainder
-        );
-
         if ascending {
             // For ascending queries (>= threshold), scan left-to-right
-            // Early termination: once we find first remainder >= threshold, return true
-            // If remainder > threshold, all subsequent remainders will also be > threshold
             for pos in run_start..=run_end {
                 let remainder = self.read_slot(pos);
-                println!("        Checking position {} with remainder {} (ascending)", pos, remainder);
 
                 if remainder >= threshold_remainder {
-                    println!(
-                        "      Found remainder {} >= threshold {} at position {}",
-                        remainder, threshold_remainder, pos
-                    );
                     return true;
                 }
             }
         } else {
             // For descending queries (<= threshold), scan right-to-left
-            // Early termination: once we find first remainder <= threshold, return true
-            // If remainder < threshold, all previous remainders will also be < threshold
             let mut pos = run_end;
             loop {
                 let remainder = self.read_slot(pos);
-                println!("        Checking position {} with remainder {} (descending)", pos, remainder);
 
                 if remainder <= threshold_remainder {
-                    println!(
-                        "      Found remainder {} <= threshold {} at position {}",
-                        remainder, threshold_remainder, pos
-                    );
                     return true;
                 }
 
@@ -906,11 +798,6 @@ impl InfixStore {
             }
         }
 
-        println!(
-            "      No remainder found {} threshold {}",
-            if ascending { ">=" } else { "<=" },
-            threshold_remainder
-        );
         false
     }
 

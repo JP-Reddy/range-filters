@@ -7,27 +7,10 @@ fn main() {
     keys.sort();
     let keys = keys.into_iter().map(|k| k as u64).collect::<Vec<_>>();
 
-    println!("=== DIVA Range Filter Example with Large Dataset ===");
-    println!("Generated {} keys", keys.len());
-    println!(
-        "Key range: {} to {}",
-        keys.first().unwrap(),
-        keys.last().unwrap()
-    );
-
     // Build DIVA filter with target size 1024
     let target_size = 1024;
     let false_positive_rate = 0.01; // 1%
     let diva = Diva::new_with_keys(&keys, target_size, false_positive_rate);
-
-    println!("\nDIVA Filter Configuration:");
-    println!("- Total keys: {}", keys.len());
-    println!("- Target size: {}", target_size);
-    println!("- False positive rate: {}%", false_positive_rate * 100.0);
-    println!("- Sample count: {}", diva.sample_count());
-
-    // Display the filter structure (first few levels only to avoid too much output)
-    println!("{}", diva);
 
     // === Point Query Examples ===
     println!("\n=== Point Query Examples ===");
@@ -146,16 +129,4 @@ fn main() {
             );
         }
     }
-
-    // === Performance Summary ===
-    println!("\n=== Summary ===");
-    println!(
-        "Successfully demonstrated DIVA range filter with {} keys",
-        keys.len()
-    );
-    println!(
-        "Filter uses {} samples to organize data efficiently",
-        diva.sample_count()
-    );
-    println!("Point and range queries completed with expected behavior");
 }

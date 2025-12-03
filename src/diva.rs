@@ -375,8 +375,7 @@ impl Diva {
         Some(f(&*store, predecessor_key, successor_key))
     }
 
-    /// Efficiently check if any sample exists in the given range [start, end]
-    /// Much more efficient than iterating through all samples
+    /// Check if any sample exists in the given range [start, end]
     fn has_samples_in_range(&self, start: Key, end: Key) -> bool {
         if let Some(first_sample) = self.y_fast_trie.successor(start) {
             first_sample <= end
@@ -388,24 +387,17 @@ impl Diva {
     /// Point lookup: check if a key exists in the filter
     /// Returns true if key might exist (with FPR), false if definitely doesn't exist
     pub fn contains(&self, key: Key) -> bool {
-        // Step 1: Check Y-Fast Trie directly (samples)
         if self.y_fast_trie.contains(key) {
             return true;
         }
 
-        // Step 2: Query InfixStore using helper function
+        // Query InfixStore using helper function
         self.with_infix_store_for_key(key, |store, predecessor_key, successor_key| {
-            println!(
-                "Querying key {}, pred: {}, succ: {}",
-                key, predecessor_key, successor_key
-            );
             let result =
                 store.point_query(key, predecessor_key, successor_key, self.remainder_size);
-            println!("InfixStore query result for key {}: {}", key, result);
             result
         })
         .unwrap_or_else(|| {
-            println!("No predecessor InfixStore found for key {}", key);
             false
         })
     }
@@ -417,18 +409,14 @@ impl Diva {
             return false;
         }
 
-        // Step 1: Check if any samples intersect with the range
+        // Check if any samples intersect with the range
         if self.has_samples_in_range(start, end) {
-            return true; // Found a sample within the range
+            return true;
         }
 
-        // Step 2: Handle ranges that span across InfixStore boundaries
-        // We need to check all InfixStores that might contain keys in [start, end]
-
-        // Start from the predecessor of start_key
+        // Check all InfixStores
         let mut check_key = start;
         while check_key <= end {
-            // Use helper function to access InfixStore for this check_key
             if let Some(result) =
                 self.with_infix_store_for_key(check_key, |store, predecessor_key, successor_key| {
                     // Determine the range to query in this InfixStore
@@ -436,7 +424,6 @@ impl Diva {
                     let range_end = end.min(successor_key - 1);
 
                     if range_start <= range_end {
-                        // Query the InfixStore for this sub-range
                         if store.range_query(
                             range_start,
                             range_end,
