@@ -107,7 +107,7 @@ pub fn select_cached(
         let word_offset = half_pos / U64_BIT_SIZE;
 
         // search in second half
-        select(&data[word_offset..], remaining_rank).map(|pos| pos + half_pos)
+        select(&data[word_offset..], remaining_rank).map(|pos| pos + word_offset * U64_BIT_SIZE)
     }
 }
 
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn test_has_bits_in_range_single_word() {
-        let mut data = vec![0b10101u64]; // Bits 0, 2, 4 set
+        let data = vec![0b10101u64]; // Bits 0, 2, 4 set
 
         assert!(has_bits_in_range(&data, 0, 3)); // Should find bit 0 and 2
         assert!(has_bits_in_range(&data, 2, 5)); // Should find bit 2 and 4

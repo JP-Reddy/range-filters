@@ -1,11 +1,12 @@
 use crate::U64_BITS;
-use crate::bitmap::{clear_bit, get_bit, rank, select, set_bit};
+use crate::bitmap::{clear_bit, get_bit, set_bit, rank, rank_cached, select_cached};
 use std::fmt;
 
 const TARGET_SIZE: u16 = 1024;
 const QUOTIENT_SIZE: u8 = 10;
 // const LOAD_FACTOR: f64 = 0.95;
 const SIZE_GRADE_COUNT: usize = 31;
+const CACHE_BOUNDARY: u16 = TARGET_SIZE / 2;
 // const DEFAULT_SIZE_GRADE: u8 = 14;
 
 // precomputed number of slots for each size grade
@@ -174,7 +175,7 @@ impl InfixStore {
         num_slots: u16,
     ) {
         let occupieds_half = TARGET_SIZE as usize / 2;
-        let runends_half = num_slots as usize / 2;
+        let runends_half = CACHE_BOUNDARY as usize;
 
         let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
         let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
@@ -212,17 +213,15 @@ impl InfixStore {
         let is_new_quotient = !self.is_occupied(quotient as usize);
 
         // find position to insert new remainder
-        let occupieds_slice = &self.data[occupieds_start..occupieds_start + occupieds_words];
-        let runends_slice = &self.data[runends_start..runends_start + runends_words];
-        let run_index = rank(occupieds_slice, quotient as usize);
+        let run_index = self.rank_occupieds_cached(quotient as usize);
         let run_start = if run_index == 0 {
             0
         } else {
-            select(runends_slice, run_index - 1)
+            self.select_runends_cached(run_index - 1)
                 .map(|x| x + 1)
                 .unwrap_or(0)
         };
-        let run_end = select(runends_slice, run_index).unwrap_or(self.elem_count as usize);
+        let run_end = self.select_runends_cached(run_index).unwrap_or(self.elem_count as usize);
 
         let insert_pos;
         if is_new_quotient {
@@ -272,6 +271,9 @@ impl InfixStore {
         }
         // increment element count
         self.elem_count += 1;
+
+        // recompute cache
+        Self::compute_popcounts(&mut self.data, occupieds_start, runends_start, num_slots);
         true
     }
 
@@ -283,26 +285,25 @@ impl InfixStore {
             return false;
         }
 
-        let num_slots = SCALED_SIZES[self.size_grade as usize];
+        let mut num_slots = SCALED_SIZES[self.size_grade as usize];
         let (occupieds_start, runends_start, _) = self.get_offsets();
         let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
         let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
 
         // find the run index
-        let occupieds_slice = &self.data[occupieds_start..occupieds_start + occupieds_words];
-        let runends_slice = &self.data[runends_start..runends_start + runends_words];
-        let run_index = rank(occupieds_slice, quotient as usize);
+        let run_index = self.rank_occupieds_cached(quotient as usize);
 
         // calculate run start and end
         let run_start = if run_index == 0 {
             0
         } else {
-            select(runends_slice, run_index - 1)
+            // select(runends_slice, run_index - 1)
+            self.select_runends_cached(run_index - 1)
                 .map(|x| x + 1)
                 .unwrap_or(0)
         };
         let run_end =
-            select(runends_slice, run_index).expect("panic: occupied bit set but no runend found.");
+            self.select_runends_cached(run_index).expect("panic: occupied bit set but no runend found.");
 
         // find the slot position to be deleted
         let mut del_pos = None;
@@ -342,9 +343,12 @@ impl InfixStore {
             let prev_size_grade = SCALED_SIZES[(self.size_grade - 1) as usize];
             if self.elem_count <= prev_size_grade / 2 {
                 self.resize_down();
+                num_slots = SCALED_SIZES[self.size_grade as usize];
             }
         }
 
+        // recompute cache
+        Self::compute_popcounts(&mut self.data, occupieds_start, runends_start, num_slots);
         true
     }
 
@@ -391,6 +395,9 @@ impl InfixStore {
 
         self.data = new_data;
         self.size_grade = new_size_grade;
+
+        // recompute cache
+        Self::compute_popcounts(&mut self.data, occupieds_start, runends_start, new_num_slots);
     }
 
     fn resize_up(&mut self) -> bool {
@@ -804,18 +811,10 @@ impl InfixStore {
     /// Get the start and end positions of a quotient's run
     fn get_run_bounds(&self, quotient: usize) -> Option<(usize, usize)> {
         // Get the rank of this quotient (how many quotients before it)
-        let (occupieds_start, runends_start, _) = self.get_offsets();
-        let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
-        let occupieds_slice = &self.data[occupieds_start..occupieds_start + occupieds_words];
-
-        let rank_result = rank(occupieds_slice, quotient);
+        let rank_result = self.rank_occupieds_cached(quotient);
 
         // Use select to find the end position of this run
-        let num_slots = SCALED_SIZES[self.size_grade as usize];
-        let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
-        let runends_slice = &self.data[runends_start..runends_start + runends_words];
-
-        let run_end = match select(runends_slice, rank_result) {
+        let run_end = match self.select_runends_cached(rank_result) {
             Some(pos) => pos,
             None => return None,
         };
@@ -827,6 +826,39 @@ impl InfixStore {
         }
 
         Some((run_start, run_end))
+    }
+
+    // get cached popcount
+    #[inline]
+    fn get_popcount_occupieds(&self) -> u32 {
+        (self.data[0] >> 32) as u32
+    }
+
+    // get cached popcount
+    #[inline]
+    fn get_popcount_runends(&self) -> u32 {
+        (self.data[0] & 0xFFFFFFFF) as u32
+    }
+
+    #[inline]
+    pub fn rank_occupieds_cached(&self, quotient: usize) -> usize {
+        let (occupieds_start, _, _) = self.get_offsets();
+        let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
+        let occupieds_slice = &self.data[occupieds_start..occupieds_start + occupieds_words];
+        let cached_popcount = self.get_popcount_occupieds() as usize;
+        let half_pos = CACHE_BOUNDARY as usize;
+        rank_cached(occupieds_slice, quotient, half_pos, cached_popcount)
+    }
+
+    #[inline]
+    pub fn select_runends_cached(&self, rank_val: usize) -> Option<usize> {
+        let num_slots = SCALED_SIZES[self.size_grade as usize];
+        let (_, runends_start, _) = self.get_offsets();
+        let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
+        let runends_slice = &self.data[runends_start..runends_start + runends_words];
+        let cached_popcount = self.get_popcount_runends() as usize;
+        let half_pos = CACHE_BOUNDARY as usize;
+        select_cached(runends_slice, rank_val, half_pos, cached_popcount)
     }
 }
 
@@ -1231,5 +1263,194 @@ mod tests {
 
         assert_eq!(store.elem_count, 100);
         assert!(store.size_grade() < size_after_insert);
+    }
+
+    // Helper function to verify cache integrity
+    fn verify_cache_integrity(store: &InfixStore) {
+        let cached_occupieds = store.get_popcount_occupieds();
+        let cached_runends = store.get_popcount_runends();
+
+        let (occupieds_start, runends_start, _) = store.get_offsets();
+        let occupieds_words = (TARGET_SIZE as usize + U64_BITS - 1) / U64_BITS;
+        let num_slots = SCALED_SIZES[store.size_grade() as usize];
+        let runends_words = (num_slots as usize + U64_BITS - 1) / U64_BITS;
+
+        let occupieds_slice = &store.data[occupieds_start..occupieds_start + occupieds_words];
+        let runends_slice = &store.data[runends_start..runends_start + runends_words];
+
+        let expected_occupieds = rank(occupieds_slice, CACHE_BOUNDARY as usize) as u32;
+        let expected_runends = rank(runends_slice, CACHE_BOUNDARY as usize) as u32;
+
+        assert_eq!(
+            cached_occupieds, expected_occupieds,
+            "Occupieds cache mismatch: cached={}, expected={}, elem_count={}, size_grade={}",
+            cached_occupieds, expected_occupieds, store.elem_count, store.size_grade
+        );
+        assert_eq!(
+            cached_runends, expected_runends,
+            "Runends cache mismatch: cached={}, expected={}, elem_count={}, size_grade={}",
+            cached_runends, expected_runends, store.elem_count, store.size_grade
+        );
+    }
+
+    #[test]
+    fn test_cache_integrity_after_each_insert() {
+        let mut store = InfixStore::new_with_infixes(&[], 8);
+        verify_cache_integrity(&store);
+
+        // insert items with single quotient and verify cache after each
+        for i in 0..50 {
+            store.insert((100u64 << 8) | i);
+            verify_cache_integrity(&store);
+        }
+
+        // insert items with different quotients and verify
+        for q in 50..70 {
+            store.insert((q << 8) | 100);
+            verify_cache_integrity(&store);
+        }
+    }
+
+    #[test]
+    fn test_cache_integrity_after_each_delete() {
+        let infixes: Vec<u64> = (0..100).map(|i| (50u64 << 8) | i).collect();
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+        verify_cache_integrity(&store);
+
+        // delete items one by one and verify cache
+        for i in 0..50 {
+            store.delete((50u64 << 8) | i);
+            verify_cache_integrity(&store);
+        }
+    }
+
+    #[test]
+    fn test_cache_integrity_with_multiple_quotients() {
+        let mut store = InfixStore::new_with_infixes(&[], 8);
+
+        // insert items with various quotients
+        for q in [10, 50, 100, 200, 400, 500, 600, 700] {
+            for r in 0..10 {
+                store.insert((q << 8) | r);
+                verify_cache_integrity(&store);
+            }
+        }
+
+        // delete some items
+        for q in [50, 200, 500] {
+            for r in 0..5 {
+                store.delete((q << 8) | r);
+                verify_cache_integrity(&store);
+            }
+        }
+    }
+
+    #[test]
+    fn test_cache_integrity_near_boundary() {
+        let mut store = InfixStore::new_with_infixes(&[], 8);
+
+        // insert quotients around the 512 cache boundary
+        for q in 480..540 {
+            store.insert((q << 8) | 50);
+            verify_cache_integrity(&store);
+        }
+
+        // delete quotients around boundary
+        for q in 490..520 {
+            store.delete((q << 8) | 50);
+            verify_cache_integrity(&store);
+        }
+    }
+
+    #[test]
+    fn test_cache_integrity_after_resize_up() {
+        let mut store = InfixStore::new_with_infixes(&[], 8);
+        verify_cache_integrity(&store);
+
+        // insert enough to trigger resize up
+        for i in 0..700 {
+            store.insert((100u64 << 8) | i);
+            if i % 50 == 0 {  // verify periodically to save time
+                verify_cache_integrity(&store);
+            }
+        }
+        verify_cache_integrity(&store);
+    }
+
+    #[test]
+    fn test_cache_integrity_after_resize_down() {
+        let infixes: Vec<u64> = (0..600).map(|i| (100u64 << 8) | i).collect();
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+        verify_cache_integrity(&store);
+
+        // delete enough to trigger resize down
+        for i in 0..500 {
+            store.delete((100u64 << 8) | i);
+            if i % 50 == 0 {  // verify periodically
+                verify_cache_integrity(&store);
+            }
+        }
+        verify_cache_integrity(&store);
+    }
+
+    #[test]
+    fn test_cache_with_small_size_grade() {
+        // test with small size grade where cache covers entire store
+        let infixes: Vec<u64> = (0..100).map(|i| (100u64 << 8) | i).collect();
+        let mut store = InfixStore::new_with_infixes(&infixes, 8);
+
+        // verify cache for small store
+        assert!(SCALED_SIZES[store.size_grade() as usize] < 1024);
+        verify_cache_integrity(&store);
+
+        // perform operations and verify
+        for i in 0..50 {
+            store.delete((100u64 << 8) | i);
+        }
+        verify_cache_integrity(&store);
+
+        for i in 0..30 {
+            store.insert((100u64 << 8) | i);
+        }
+        verify_cache_integrity(&store);
+    }
+
+    #[test]
+    fn test_cache_with_large_size_grade() {
+        // test with large size grade where cache covers less than half
+        let infixes: Vec<u64> = (0..1200).map(|i| (100u64 << 8) | i).collect();
+        let mut store = InfixStore::new_with_infixes(&infixes, 10);
+
+        // verify cache for large store
+        assert!(SCALED_SIZES[store.size_grade() as usize] > 1024);
+        verify_cache_integrity(&store);
+
+        // perform operations
+        for i in 0..200 {
+            store.delete((100u64 << 8) | i);
+        }
+        verify_cache_integrity(&store);
+    }
+
+    #[test]
+    fn test_cache_with_mixed_operations() {
+        let mut store = InfixStore::new_with_infixes(&[], 8);
+
+        // mixed insert/delete operations
+        for cycle in 0..5 {
+            let base = cycle * 100;
+
+            // insert batch
+            for i in 0..50 {
+                store.insert((100u64 << 8) | (base + i));
+            }
+            verify_cache_integrity(&store);
+
+            // delete batch
+            for i in 0..30 {
+                store.delete((100u64 << 8) | (base + i));
+            }
+            verify_cache_integrity(&store);
+        }
     }
 }
