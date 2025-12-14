@@ -28,6 +28,8 @@ grafite = "0.2.0"
 
 [dev-dependencies]
 divan = "0.1"
+reqwest = { version = "0.12", features = ["blocking"] }
+zstd = "0.13"
 
 [[bench]]
 name = "query_benchmarks"
