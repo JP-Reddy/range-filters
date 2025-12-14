@@ -290,7 +290,6 @@ fn grafite_point_query(bencher: Bencher, size: usize) {
     let keys = generate_smooth_u64(Some(size));
     let grafite = GrafiteFilter::new_with_keys(&keys, 0.01);
 
-    // generate query keys (mix of existing and non-existing)
     let mut rng = rand::thread_rng();
     let query_keys: Vec<Key> = (0..1000)
         .map(|i| {
