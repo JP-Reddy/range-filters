@@ -1,6 +1,8 @@
 use rand::Rng;
 use rand::thread_rng;
 use rand_distr::{Distribution, Normal, Uniform};
+use std::fs::File;
+use std::io::{BufReader, Read};
 
 // default = 64k keys
 const DEFAULT_COUNT: usize = 1 << 16;
@@ -134,6 +136,34 @@ pub fn generate_smooth_u8(count: Option<usize>) -> Vec<u8> {
     let mean = (u8::MAX / 2) as f64;
     let std_dev = (u8::MAX / 6) as f64;
     generate_normal_u8(count, mean, std_dev)
+}
+
+/// Load Amazon dataset from binary file
+/// Format: Each entry is 8 bytes (u64 little-endian)
+pub fn load_amazon_dataset(path: &str, count: Option<usize>) -> std::io::Result<Vec<u64>> {
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut buffer = [0u8; 8];
+    let mut keys = Vec::new();
+
+    let max_count = count.unwrap_or(usize::MAX);
+
+    while keys.len() < max_count {
+        match reader.read_exact(&mut buffer) {
+            Ok(_) => {
+                let key = u64::from_le_bytes(buffer);
+                keys.push(key);
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => return Err(e),
+        }
+    }
+
+    // Sort and deduplicate
+    keys.sort_unstable();
+    keys.dedup();
+
+    Ok(keys)
 }
 
 #[cfg(test)]
