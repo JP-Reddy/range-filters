@@ -127,7 +127,7 @@ impl Diva {
         self.insert_as_sample(key)
     }
 
-    fn insert_in_infix(&mut self, key: Key) -> bool {
+    pub fn insert_in_infix(&mut self, key: Key) -> bool {
         // key should be inserted as a sample if any of the boundary keys are missing
         let (s_low, s_high) = match self
             .y_fast_trie

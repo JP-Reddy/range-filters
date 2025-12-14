@@ -20,14 +20,9 @@ impl GrafiteFilter {
     pub fn new_with_keys(keys: &[Key], epsilon: f64) -> Self {
         let num_keys = keys.len();
 
-        // Calculate max_query_range from the keys
-        let max_query_range = if keys.is_empty() {
-            0
-        } else {
-            *keys.iter().max().unwrap_or(&0)
-        };
+        const MAX_QUERY_RANGE: u64 = 1_000_000;
 
-        let hasher = PairwiseIndependentHasher::new(num_keys, epsilon, max_query_range)
+        let hasher = PairwiseIndependentHasher::new(num_keys, epsilon, MAX_QUERY_RANGE)
             .expect("Invalid parameters for PairwiseIndependentHasher");
 
         let filter = RangeFilter::new(keys.iter().copied(), hasher);
